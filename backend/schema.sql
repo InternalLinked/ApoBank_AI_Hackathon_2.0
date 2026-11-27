@@ -83,12 +83,32 @@ CREATE TABLE IF NOT EXISTS obsidian_eintrag (
     erstellt_am    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Persistente Chatverlaeufe fuer die Arbeitsoberflaeche. KI-Antworten koennen
+-- Metadaten wie erkannte Angaben und den aktuell betrachteten Vermittler tragen.
+CREATE TABLE IF NOT EXISTS chat_konversation (
+    id              TEXT PRIMARY KEY,
+    titel           TEXT NOT NULL DEFAULT 'Neue Unterhaltung',
+    vermittler_nr   INTEGER REFERENCES vermittler(vermittler_nr) ON DELETE SET NULL,
+    erstellt_am     TEXT NOT NULL DEFAULT (datetime('now')),
+    aktualisiert_am TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS chat_nachricht (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    konversation_id    TEXT NOT NULL REFERENCES chat_konversation(id) ON DELETE CASCADE,
+    rolle              TEXT NOT NULL CHECK (rolle IN ('user', 'assistant')),
+    inhalt             TEXT NOT NULL,
+    metadaten_json     TEXT,
+    erstellt_am        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_vermittler_name     ON vermittler(name, vorname);
 CREATE INDEX IF NOT EXISTS idx_vermittler_betreuer ON vermittler(mitarbeiter_id);
 CREATE INDEX IF NOT EXISTS idx_vermittler_status   ON vermittler(status);
 CREATE INDEX IF NOT EXISTS idx_kontakt_ort         ON kontakt(ort);
 CREATE INDEX IF NOT EXISTS idx_gz_jahr             ON geschaeftszahlen(jahr, sparte);
 CREATE INDEX IF NOT EXISTS idx_eintrag_vermittler  ON obsidian_eintrag(vermittler_nr, datum);
+CREATE INDEX IF NOT EXISTS idx_chat_nachricht_konversation ON chat_nachricht(konversation_id, id);
 
 -- Flache Sicht fuer Agenten: Vermittler + Kontakt + Betreuer + Filiale
 CREATE VIEW IF NOT EXISTS v_vermittler AS

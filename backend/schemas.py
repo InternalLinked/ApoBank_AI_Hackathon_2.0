@@ -88,3 +88,11 @@ class SqlQueryIn(BaseModel):
         "SELECT marktgebiet, COUNT(*) AS n FROM v_vermittler GROUP BY marktgebiet"])
     params: list[Any] | dict[str, Any] | None = None
     max_rows: int = Field(200, ge=1, le=1000)
+
+
+class ChatKonversationCreate(BaseModel):
+    titel: str = Field("Neue Unterhaltung", min_length=1, max_length=120)
+
+
+class ChatNachrichtIn(BaseModel):
+    inhalt: str = Field(min_length=1, max_length=8_000)

@@ -1,6 +1,6 @@
-# apoBank Partner-Copilot — Frontend-Prototyp
+# apoBank Partner-Copilot — Frontend
 
-Responsive Oberfläche für Chat, Partnerakte und manuelle Erfassung. Die Oberfläche ist derzeit eine interaktive Demo mit synthetischen Beispieldaten; ein Backend ist noch nicht angeschlossen.
+Responsive Oberfläche für persistente Chats, Partnerakten und manuelle Erfassung. Sie nutzt die FastAPI-API im selben Repository.
 
 ## Lokal starten
 
@@ -9,18 +9,17 @@ npm install
 npm run dev
 ```
 
-Öffne danach http://localhost:3000.
+Öffne danach http://127.0.0.1:3000. Das Backend muss parallel auf Port 8000 laufen; die Oberfläche spricht es im lokalen Entwicklungsmodus direkt an.
 
 ## Struktur
 
 - `app/` — Next.js App Router, globales Layout und Styles
 - `components/workspace/` — Chat-Seitenleiste, Unterhaltung und Partnerakten-Panel
 - `lib/workspace-contracts.ts` — typisierter Vertrag zwischen UI und Datenzugriff
-- `lib/demo-data.ts` — synthetischer UI-Zustand
-- `lib/mock-workspace-api.ts` — Demo-Adapter für Laden, Chat, manuelle Einträge und Bestätigungen
+- `lib/workspace-api.ts` — HTTP-Adapter für Chats, Vermittler, Notizen, Uploads und Bestätigungen
 
-## Backend anschließen
+## API und KI
 
-Die UI hängt an `WorkspaceApi` aus `lib/workspace-contracts.ts`. `createMockWorkspaceApi()` in `lib/mock-workspace-api.ts` ist der austauschbare Demo-Adapter. Für das Backend kann ein HTTP-Adapter dieselben Methoden implementieren (`loadWorkspace`, `sendMessage`, `createEntry`, `confirmFindings`), ohne Chat- und Panel-Komponenten an API-Details zu koppeln.
+`WorkspaceApi` hält die Komponenten von HTTP-Details getrennt. Der konkrete Adapter speichert Chats, legt Vermittler und Notizen an und lädt Partnerakten aus FastAPI. Die OpenAI-Anfrage erfolgt ausschließlich im Python-Backend; der Browser bekommt keinen API-Key.
 
-Die konkreten Endpunkte, Authentifizierung, Fehlerbehandlung und Persistenz sollen mit dem Backend-Team abgestimmt werden. Die Demo speichert keine Daten dauerhaft.
+Für die Produktionsauslieferung wird die App als statischer Export gebaut und durch FastAPI bereitgestellt. Dadurch verwendet sie auch dort dieselbe relative `/api`-Adresse.

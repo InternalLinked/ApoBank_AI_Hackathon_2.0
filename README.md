@@ -88,9 +88,22 @@ Typen: `gespraech`, `telefonat`, `email`, `notiz`, `massnahme`, `dokument`, `son
 
 Hinweis: Die Werte für 2026 sind unterjährig; Wachstumsvergleiche besser zwischen abgeschlossenen Jahren.
 
-## Frontend (Prototyp)
+## Weboberfläche und Copilot
 
-Die Next.js-Oberfläche liegt in `frontend/`. Sie bündelt links Chats, mittig die Unterhaltung und rechts erkannte Informationen oder manuelle Eingabe.
+Die Next.js-Oberfläche liegt in `frontend/`: links stehen persistente Chatverläufe, mittig der Copilot und rechts die Partnerakte mit manueller Eingabe. Im lokalen Entwicklungsmodus ruft sie FastAPI auf Port 8000 auf; im Container spricht sie über die gleiche Origin mit `/api`. Der produktive Container liefert den statischen Frontend-Export direkt über FastAPI aus.
+
+### Lokal starten
+
+Terminal 1:
+
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m backend.import_excel --reset
+.venv/bin/python -m uvicorn backend.main:app --reload
+```
+
+Terminal 2:
 
 ```bash
 cd frontend
@@ -98,6 +111,19 @@ npm ci
 npm run dev
 ```
 
-Die UI verwendet derzeit synthetische Beispieldaten und einen Mock-Adapter. Der Vertrag steht in `frontend/lib/workspace-contracts.ts`; der Austauschpunkt ist `frontend/lib/mock-workspace-api.ts`.
+Danach läuft die Oberfläche auf http://127.0.0.1:3000. Neue Vermittler, Gesprächsnotizen, Anhänge und bestätigte Angaben werden über das Backend in SQLite und dem Obsidian-Vault gespeichert.
 
-Geplante Anbindung an das vorhandene Backend: `GET /api/vermittler` für Suche/Listen, `GET /api/vermittler/{nr}/kontext` für die Akte, `POST /api/vermittler` und `PATCH /api/vermittler/{nr}` für Stammdaten sowie `POST /api/vermittler/{nr}/obsidian/eintraege` für bestätigte Notizen. Der Chat selbst benötigt zusätzlich eine Agent-/LLM-Schicht; das Backend stellt Daten und Werkzeuge bereit.
+### OpenAI konfigurieren
+
+Der API-Key bleibt ausschließlich im Backend. Kopiere `.env.example` nach `.env` und setze den Schlüssel als Umgebungsvariable, bevor der FastAPI-Server startet:
+
+```bash
+export OPENAI_API_KEY="..."
+export OPENAI_MODEL="gpt-5-mini"
+```
+
+Der Copilot nutzt die OpenAI Responses API mit ausschließlich lesenden Werkzeugen für Vermittlersuche, Partnerakten, Gesprächsnotizen und Portfolioübersicht. Konkrete Angaben aus einer Nachricht werden nur als Vorschlag angezeigt; erst der Button **„Angaben übernehmen“** speichert sie als Notiz. Ohne Key bleibt die Oberfläche nutzbar und zeigt die erforderliche Konfiguration an.
+
+### AWS / Deployment
+
+`Dockerfile` baut das Next.js-Frontend und startet FastAPI auf Port 80. `buildspec.yml` kann dieses Image wie bisher in ECR veröffentlichen. Für ECS müssen `/app/data` und `/app/vault` persistent gemountet werden, zum Beispiel über EFS; SQLite und hochgeladene Dokumente gehen sonst bei einem Task-Neustart verloren. Schlüssel wie `OPENAI_API_KEY` gehören in ECS Secrets oder Parameter Store, nie in GitHub oder das Docker-Image.
