@@ -8,6 +8,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+# .env.local (geheime Schluessel, gitignored) zuerst laden: load_dotenv ueberschreibt nichts,
+# daher gewinnt .env.local vor .env. Echte Umgebungsvariablen gewinnen vor beiden.
+load_dotenv(BASE_DIR / ".env.local")
 load_dotenv(BASE_DIR / ".env")
 
 
