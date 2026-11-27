@@ -313,3 +313,24 @@ vault/
 | – | Zielerreichung der Geschäftsplanung | braucht Plandaten → Tabelle `planzahlen(vermittler_nr|filial_nr, jahr, sparte, ziel_eur)` |
 | – | Authentifizierung | aktuell keine; vor jedem nicht-lokalen Betrieb ergänzen |
 | – | Löschen von Vermittlern | bewusst nicht implementiert |
+
+---
+
+## 10. KI-Copilot (`backend/copilot/`)
+
+Die Agenten- und LLM-Schicht aus Abschnitt 9, Phase 1, liegt als eigenständiges Modul in `backend/copilot/`.
+Es ändert keine bestehenden Dateien. Details und die Frontend-Anbindung stehen in `backend/copilot/README.md`.
+
+- Start inkl. Chat-Endpunkten: `.venv\Scripts\python -m uvicorn backend.copilot.app:app --reload`
+  (Team-API + `/api/copilot/*`)
+- Synthetische Demo-Daten: `.venv\Scripts\python -m backend.copilot.demo_daten --neu`
+- Modell austauschbar über `LLM_PROVIDER` (`fake` offline | `bedrock`), `LLM_MODEL_ID`, `AWS_REGION` (Sandbox: us-west-2/us-east-1).
+- Regeln:
+  - Das Modell rechnet nicht, alle Zahlen kommen aus SQL.
+  - Bei Mehrdeutigkeit fragt der Agent nach.
+  - Geschrieben wird nur über Entwürfe und den Endpunkt `…/entwuerfe/{id}/bestaetigen`, den ausschließlich die Oberfläche
+    nach einem Klick des Nutzers aufruft.
+  - Die Schreib-Endpunkte des Backends nie direkt als Modellwerkzeuge freigeben.
+- Zugangsdaten nie ins Repo.
+  - AWS nur über die SDK-Standardkette mit einer Datei außerhalb des Repos.
+  - Daten aus der Kundendatei gehen nur mit Freigabe an Modelle außerhalb der EU (`COPILOT_DATENQUELLE`, `FREIGABE_KUNDENDATEN_US`).
