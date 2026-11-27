@@ -28,6 +28,30 @@ export type ChatMessage = {
   candidates?: PartnerCandidate[];
   /** SQL-Analysen dieser Antwort – Diagramm und SQL im Tab „Analyse“. */
   analyses?: Analysis[];
+  /** Änderungsvorschläge der KI – erst nach Bestätigung im Tab „Änderungen“ gespeichert. */
+  proposals?: ChangeProposal[];
+};
+
+export type ProposalStatus = "offen" | "bestaetigt" | "verworfen";
+
+export type ProposedChange = {
+  /** z. B. „Kontakt“, „Stammdaten“, „Geschäftszahlen“, „Persönliches Profil“ */
+  area: string;
+  /** z. B. „E-Mail“, „Kreditvolumen (EUR) 2025“ */
+  label: string;
+  oldValue: string | number | null;
+  newValue: string | number | null;
+  kind: "stammdaten" | "kontakt" | "geschaeftszahlen" | "profil_fakt_aendern" | "profil_fakt_loeschen";
+};
+
+export type ChangeProposal = {
+  id: string;
+  status: ProposalStatus;
+  vermittlerNr: number;
+  vermittler: string;
+  reason: string;
+  changes: ProposedChange[];
+  createdAt: string;
 };
 
 export type ChartType = "balken" | "linie" | "tabelle";
@@ -179,6 +203,9 @@ export type Transcription = {
 
 export interface WorkspaceApi {
   loadWorkspace(): Promise<WorkspaceSnapshot>;
+  /** Änderungsvorschlag der KI ausführen (409 bei Konflikt) bzw. verwerfen */
+  confirmProposal(proposalId: string): Promise<{ partner: PartnerSummary | null }>;
+  rejectProposal(proposalId: string): Promise<void>;
   /** Sprachaufnahme (16-bit-PCM, mono) per Amazon Transcribe in Text umwandeln */
   transcribe(pcm: Blob, sampleRate: number, language?: string): Promise<Transcription>;
   createConversation(): Promise<Conversation>;

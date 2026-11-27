@@ -2,7 +2,8 @@
 
 Lesen: Suche, Partnerakte, Notizen, Portfolio. Schreiben: ausschliesslich ins
 Obsidian-Netz (persoenliches Profil + Notiz-Eintraege) ueber `im_obsidian_speichern`,
-ohne Rueckfrage. Stammdaten und Geschaeftszahlen in der Datenbank aendert der Agent nicht.
+ohne Rueckfrage. Aendern von Stammdaten, Kontakt, Geschaeftszahlen und Profil-Fakten nur als
+Vorschlag (`aenderung_vorschlagen`); ausgefuehrt wird erst nach Klick im Tab "Aenderungen".
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import db, obsidian
+from . import aenderungen, db, obsidian
 from .config import settings
 
 logger = logging.getLogger("apobank.copilot")
@@ -60,7 +61,15 @@ rufe sofort `im_obsidian_speichern` auf – ohne Rueckfrage und ohne Bestaetigun
 Sage danach kurz, was gespeichert wurde. Nur wenn unklar ist, welcher Vermittler
 gemeint ist (kein oder mehrere Treffer), frage vorher nach (bei mehreren: `auswahl_anbieten`). Speichere nur, was der
 Nutzer tatsaechlich gesagt hat, und nichts doppelt, was schon in der Akte steht.
-Stammdaten und Geschaeftszahlen kannst du nicht aendern; sag das dem Nutzer.
+
+Aendern (Stammdaten, Kontaktdaten, Interessen/Hobbys, Status, Geschaeftszahlen, bestehende Profil-Fakten
+korrigieren oder loeschen): Das darfst du – aber NIE direkt. Rufe `aenderung_vorschlagen` mit ALLEN
+gewuenschten Aenderungen auf einmal auf. Kennst du die aktuellen Werte oder Profil-Fakten nicht, lies
+vorher `hole_partnerakte`. Der Nutzer sieht den Vorschlag als Liste alt → neu im Tab "Aenderungen" und
+bestaetigt ihn dort per Klick. Schreibe danach kurz, was du vorgeschlagen hast, und dass es erst nach
+dem Bestaetigen im Tab "Aenderungen" gespeichert ist. Behaupte NIE, etwas sei bereits geaendert.
+Werden Felder abgelehnt (`nicht_uebernommen`), sage dem Nutzer warum. Neue Infos (nicht Korrekturen)
+speicherst du weiterhin mit `im_obsidian_speichern`.
 
 Gruppen beim Speichern:
 - "persoenlich": Privates fuer das persoenliche Profil (z. B. "war gerade auf
@@ -210,6 +219,50 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "name": "aenderung_vorschlagen",
+        "description": (
+            "Erstellt einen AENDERUNGSVORSCHLAG fuer einen Vermittler, der erst nach Bestaetigung durch den Nutzer "
+            "(Tab 'Aenderungen') ausgefuehrt wird. Speichert NICHTS direkt. Alle Aenderungen eines Wunschs in EINEN Aufruf.\n"
+            "art und feld:\n"
+            "- stammdaten: anrede, titel, sonstiger_titel, vorname, name, geburtstag (JJJJ-MM-TT), firma_filiale, "
+            "firma_holding, vermittlertyp, status (aktiv|inaktiv|gesperrt), abrechnungskreis, status_vertriebspartner, "
+            "interessen (kommagetrennt, ERSETZT die Liste – bestehende mitnehmen, wenn nur ergaenzt werden soll), "
+            "betreuung_seit, betreuung_bis\n"
+            "- kontakt: email, telefon_dienst, handy_dienst, telefon_privat, strasse, plz, ort, adressentyp\n"
+            "- geschaeftszahlen: feld volumen_eur | anzahl_darlehen, dazu jahr (z. B. 2025), wert als ganze Zahl\n"
+            "- profil_fakt_aendern: fakt_id = ID oder bisheriger Text des Profil-Fakts, wert = neuer Text\n"
+            "- profil_fakt_loeschen: fakt_id = ID oder bisheriger Text\n"
+            "Nicht benoetigte Felder: feld '' / jahr 0 / fakt_id '' / wert ''. Leerer wert bei stammdaten/kontakt = Feld leeren."
+        ),
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "vermittler_nr": {"type": "integer"},
+                "begruendung": {"type": "string", "description": "Kurzer Anlass, z. B. 'Neue E-Mail laut Nutzer'"},
+                "aenderungen": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "art": {"type": "string", "enum": ["stammdaten", "kontakt", "geschaeftszahlen",
+                                                               "profil_fakt_aendern", "profil_fakt_loeschen"]},
+                            "feld": {"type": "string"},
+                            "jahr": {"type": "integer"},
+                            "fakt_id": {"type": "string"},
+                            "wert": {"type": "string"},
+                        },
+                        "required": ["art", "feld", "jahr", "fakt_id", "wert"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["vermittler_nr", "begruendung", "aenderungen"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
         "name": "im_obsidian_speichern",
         "description": ("Speichert Angaben sofort im Obsidian-Netz des Vermittlers: 'persoenlich' ins persoenliche "
                         "Profil, alles andere als Notiz-Eintrag (next-step als Massnahme). Keine Rueckfrage noetig."),
@@ -252,6 +305,8 @@ class CopilotReply:
     kandidaten: list[dict[str, Any]] = field(default_factory=list)
     # Ausgefuehrte SQL-Analysen fuer den Tab "Analyse": [{"id", "titel", "sql", "spalten", "zeilen", "diagramm", ...}]
     analysen: list[dict[str, Any]] = field(default_factory=list)
+    # Aenderungsvorschlaege (alt -> neu), werden erst nach Klick im Tab "Aenderungen" ausgefuehrt
+    vorschlaege: list[dict[str, Any]] = field(default_factory=list)
 
 
 MAX_KANDIDATEN = 20
@@ -651,6 +706,7 @@ def antwort_auf_nachricht(conn: sqlite3.Connection, history: list[dict[str, str]
     sources: list[str] = []
     kandidaten: list[dict[str, Any]] = []
     analysen: list[dict[str, Any]] = []
+    vorschlaege: list[dict[str, Any]] = []
     letzte_suche: list[int] = []  # Treffer der letzten Vermittlersuche, fuer die Absicherung unten
     # Spekulativ: Der Analyse-Agent startet sofort und bereitet SQL + Ergebnis vor, waehrend der
     # Chat-Agent noch nachdenkt. Braucht der Chat-Agent es, holt er es per `vorbereitete_analyse` ab.
@@ -678,6 +734,7 @@ def antwort_auf_nachricht(conn: sqlite3.Connection, history: list[dict[str, str]
                     sources=sources,
                     kandidaten=kandidaten,
                     analysen=analysen,
+                    vorschlaege=vorschlaege,
                 )
 
             input_items.extend(response.output)
@@ -695,6 +752,13 @@ def antwort_auf_nachricht(conn: sqlite3.Connection, history: list[dict[str, str]
                         if analyse:
                             analysen.append(analyse)
                         nr, proposed, source = None, [], "SQL-Analyse"
+                    elif call.name == "aenderung_vorschlagen":
+                        nr = int(arguments["vermittler_nr"])
+                        output, vorschlag = aenderungen.vorschlag_bauen(conn, nr, str(arguments.get("begruendung") or ""), list(arguments["aenderungen"]))
+                        if vorschlag:
+                            vorschlaege = [x for x in vorschlaege if x["vermittler_nr"] != nr] + [vorschlag]
+                        nr = nr if vorschlag else None
+                        proposed, source = [], "Aenderungsvorschlag"
                     elif call.name == "auswahl_anbieten":
                         kandidaten = _kandidaten(conn, [int(nr) for nr in arguments["vermittler_nrs"]])
                         output, nr, proposed, source = (
@@ -728,4 +792,5 @@ def antwort_auf_nachricht(conn: sqlite3.Connection, history: list[dict[str, str]
         sources=sources,
         kandidaten=kandidaten,
         analysen=analysen,
+                    vorschlaege=vorschlaege,
     )

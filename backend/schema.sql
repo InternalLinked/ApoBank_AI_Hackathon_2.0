@@ -105,6 +105,20 @@ CREATE TABLE IF NOT EXISTS chat_nachricht (
     erstellt_am        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Aenderungsvorschlaege der KI (Stammdaten, Kontakt, Geschaeftszahlen, Profil). Werden erst nach
+-- Klick auf "Bestaetigen" im Tab "Aenderungen" ausgefuehrt; gebunden an Chat + Browser-ID.
+CREATE TABLE IF NOT EXISTS chat_aenderung (
+    id                 TEXT PRIMARY KEY,
+    konversation_id    TEXT NOT NULL REFERENCES chat_konversation(id) ON DELETE CASCADE,
+    client_id          TEXT,
+    vermittler_nr      INTEGER NOT NULL,
+    vorschlag_json     TEXT NOT NULL,                  -- {vermittler, begruendung, aenderungen: [{alt, neu, ...}]}
+    status             TEXT NOT NULL DEFAULT 'offen' CHECK (status IN ('offen', 'bestaetigt', 'verworfen')),
+    ergebnis_json      TEXT,
+    erstellt_am        TEXT NOT NULL DEFAULT (datetime('now')),
+    entschieden_am     TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_vermittler_name     ON vermittler(name, vorname);
 CREATE INDEX IF NOT EXISTS idx_vermittler_betreuer ON vermittler(mitarbeiter_id);
 CREATE INDEX IF NOT EXISTS idx_vermittler_status   ON vermittler(status);

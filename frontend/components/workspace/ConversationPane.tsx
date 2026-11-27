@@ -1,11 +1,12 @@
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { ChatMessage, Conversation, PartnerCandidate, PartnerSummary } from "@/lib/workspace-contracts";
+import type { ChangeProposal, ChatMessage, Conversation, PartnerCandidate, PartnerSummary, ProposalStatus } from "@/lib/workspace-contracts";
 import { AnalysisPanel } from "./AnalysisPanel";
+import { ChangesPanel } from "./ChangesPanel";
 import { Icon } from "./Icons";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { VoiceButton } from "./VoiceButton";
 
-type PaneTab = "chat" | "analyse";
+type PaneTab = "chat" | "analyse" | "aenderungen";
 
 type ConversationPaneProps = {
   conversation: Conversation | undefined;
@@ -19,9 +20,12 @@ type ConversationPaneProps = {
   onSelectCandidate: (candidate: PartnerCandidate) => void;
   onTranscribe: (pcm: Blob, sampleRate: number) => Promise<string>;
   onError: (message: string) => void;
+  /** true = erfolgreich (Status wird lokal aktualisiert); Fehler zeigt der Aufrufer selbst an */
+  onConfirmProposal: (proposal: ChangeProposal) => Promise<boolean>;
+  onRejectProposal: (proposal: ChangeProposal) => Promise<boolean>;
 };
 
-export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, onOpenDetails, onSelectCandidate, onTranscribe, onError }: ConversationPaneProps) {
+export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, onOpenDetails, onSelectCandidate, onTranscribe, onError, onConfirmProposal, onRejectProposal }: ConversationPaneProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -35,6 +39,24 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
   const bottomRef = useRef<HTMLDivElement>(null);
   // Neueste Analyse zuerst
   const analyses = useMemo(() => messages.flatMap((message) => message.analyses ?? []).reverse(), [messages]);
+  // Status nach Klick sofort lokal übernehmen (beim nächsten Laden kommt er vom Server)
+  const [proposalStatus, setProposalStatus] = useState<Record<string, ProposalStatus>>({});
+  const [focusedProposalId, setFocusedProposalId] = useState<string | null>(null);
+  const proposals = useMemo(
+    () => messages.flatMap((message) => message.proposals ?? []).reverse().map((p) => ({ ...p, status: proposalStatus[p.id] ?? p.status })),
+    [messages, proposalStatus],
+  );
+  const openProposals = proposals.filter((p) => p.status === "offen").length;
+
+  async function decide(proposal: ChangeProposal, confirm: boolean) {
+    const ok = await (confirm ? onConfirmProposal(proposal) : onRejectProposal(proposal));
+    if (ok) setProposalStatus((current) => ({ ...current, [proposal.id]: confirm ? "bestaetigt" : "verworfen" }));
+  }
+
+  function openProposal(id: string) {
+    setFocusedProposalId(id);
+    setTab("aenderungen");
+  }
 
   useEffect(() => {
     if (tab === "chat") bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -44,6 +66,7 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
   useEffect(() => {
     setTab("chat");
     setFocusedAnalysisId(null);
+    setFocusedProposalId(null);
   }, [conversation?.id]);
 
   function openAnalysis(id: string) {
@@ -81,7 +104,6 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
       <section className="conversation-heading">
         <div className="heading-mark"><Icon name="sparkle" size={15} /></div>
         <div className="heading-copy"><span>CHAT · {partner ? `PARTNERAKTE ${partner.partnerId}` : "PARTNERVERTRIEB"}</span><h1>{conversation?.title ?? "Neue Unterhaltung"}</h1></div>
-        <button className="heading-action" type="button"><Icon name="more" size={18} /></button>
       </section>
 
       <div className="pane-tabs" role="tablist" aria-label="Ansicht">
@@ -91,9 +113,16 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
         <button type="button" role="tab" id="tab-analyse" aria-controls="panel-analyse" aria-selected={tab === "analyse"} className={tab === "analyse" ? "is-active" : ""} onClick={() => setTab("analyse")}>
           <Icon name="filter" size={14} /> Analyse{analyses.length > 0 && <span className="pane-tab-count">{analyses.length}</span>}
         </button>
+        <button type="button" role="tab" id="tab-aenderungen" aria-controls="panel-aenderungen" aria-selected={tab === "aenderungen"} className={tab === "aenderungen" ? "is-active" : ""} onClick={() => setTab("aenderungen")}>
+          <Icon name="note" size={14} /> Änderungen{openProposals > 0 && <span className="pane-tab-count is-alert" aria-label={`${openProposals} offen`}>{openProposals}</span>}
+        </button>
       </div>
 
-      {tab === "analyse" ? (
+      {tab === "aenderungen" ? (
+        <section className="pane-tab-panel" role="tabpanel" id="panel-aenderungen" aria-labelledby="tab-aenderungen">
+          <ChangesPanel proposals={proposals} focusedId={focusedProposalId} onConfirm={(p) => decide(p, true)} onReject={(p) => decide(p, false)} onBackToChat={() => setTab("chat")} />
+        </section>
+      ) : tab === "analyse" ? (
         <section className="pane-tab-panel" role="tabpanel" id="panel-analyse" aria-labelledby="tab-analyse">
           <AnalysisPanel analyses={analyses} focusedId={focusedAnalysisId} onBackToChat={() => setTab("chat")} />
         </section>
@@ -137,6 +166,20 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
                           <Icon name="filter" size={14} /> Diagramm ansehen: {analysis.title} <Icon name="chevron" size={13} />
                         </button>
                       ))}
+                    </div>
+                  )}
+                  {message.proposals && (
+                    <div className="analysis-links">
+                      {message.proposals.map((proposal) => {
+                        const status = proposalStatus[proposal.id] ?? proposal.status;
+                        return (
+                          <button type="button" key={proposal.id} className={`proposal-link status-${status}`} onClick={() => openProposal(proposal.id)}>
+                            <Icon name={status === "bestaetigt" ? "check" : "note"} size={14} />
+                            {status === "offen" ? `${proposal.changes.length} ${proposal.changes.length === 1 ? "Änderung" : "Änderungen"} prüfen und bestätigen` : status === "bestaetigt" ? "Änderungen gespeichert" : "Änderungen verworfen"}
+                            <Icon name="chevron" size={13} />
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                   {message.source && <div className="message-source"><Icon name="file" size={14} /><span>{message.source}</span><Icon name="chevron" size={13} /></div>}
