@@ -421,24 +421,9 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
   .add-entry-button { width: 32px; justify-content: center; padding: 0; }
 }
 
-/* Persönliches Profil (Obsidian) */
+/* Obsidian-Links in der Partnerakte */
 .obsidian-link { color: #5275a4; font-size: 10px; font-weight: 600; text-decoration: none; }
 .obsidian-link:hover { color: #17427f; text-decoration: underline; }
-.personal-profile { margin: 0 17px 16px; padding: 12px; border: 1px solid #eee8d8; border-radius: 11px; background: linear-gradient(145deg, #fffefa, #fffaf0); animation: content-enter .28s ease both; }
-.personal-profile .partner-profile-heading h3 { color: #6f5a2c; }
-.personal-profile-empty { margin: 0 0 10px; color: #8e805f; font-size: 11px; line-height: 1.5; }
-.personal-profile-groups { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
-.personal-profile-group h4 { margin: 0 0 4px; color: #a28852; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
-.personal-profile-group ul { margin: 0; padding: 0; list-style: none; }
-.personal-profile-group li { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; padding: 3px 0; color: #4a3f26; font-size: 12.5px; line-height: 1.4; }
-.personal-profile-group li small { margin-left: 6px; color: #b3a47f; font-size: 10px; }
-.personal-profile-group li .icon-button { width: 18px; height: 18px; flex: 0 0 auto; opacity: .45; }
-.personal-profile-group li:hover .icon-button { opacity: 1; }
-.personal-profile-form { display: flex; flex-direction: column; gap: 6px; }
-.personal-profile-form input, .personal-profile-form select { min-width: 0; padding: 6px 8px; border: 1px solid #e6dcc4; border-radius: 7px; background: #fff; color: #3b3220; font: inherit; font-size: 12.5px; }
-.personal-profile-form > div { display: flex; gap: 6px; }
-.personal-profile-form select { flex: 1; }
-.personal-profile-form .add-entry-button:disabled { opacity: .5; cursor: default; }
 
 /* Obsidian-Netz (lokale Graph-Ansicht) */
 .obsidian-graph { margin: 0 17px 16px; padding: 12px; border: 1px solid #262c3a; border-radius: 11px; background: #1e2230; animation: content-enter .28s ease both; }
@@ -549,3 +534,8 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
   .conversation-row:hover .conversation-time,
   .conversation-row:focus-within .conversation-time { opacity: 1; }
 }
+
+/* Partnerprofil: Interessen aus dem Obsidian-Profil */
+.partner-interests { margin-top: 10px; }
+.partner-interests-label { display: block; color: #8192aa; font-size: 10px; }
+.partner-interests .partner-tags { margin-top: 4px; }

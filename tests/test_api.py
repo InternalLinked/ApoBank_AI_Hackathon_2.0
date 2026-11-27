@@ -399,7 +399,8 @@ def test_persoenliches_profil(client):
     assert profil_path.exists()
     hub = (settings.vault_path / obsidian.hub_rel(4251)).read_text(encoding="utf-8")
     assert "![[VM-4251 Profil]]" in hub
-    assert client.get("/api/vermittler/4251/profil").json()["fakten"] == []
+    # Nur die Interessen aus der DB-Spalte (Testdaten: "Sport") sind anfangs im Profil
+    assert [(f["kategorie"], f["text"]) for f in client.get("/api/vermittler/4251/profil").json()["fakten"]] == [("interessen", "Sport")]
 
     # Kategorie wird per Stichwort erkannt oder explizit gesetzt
     hund = client.post("/api/vermittler/4251/profil/fakten", json={"text": "Hat einen Hund namens Tim"})
@@ -470,7 +471,7 @@ def test_copilot_speichert_direkt_im_obsidian(client):
     assert all(f["status"] == "confirmed" for f in findings) and len(findings) == 4
 
     profil = {f["text"]: f["kategorie"] for f in client.get("/api/vermittler/4251/profil").json()["fakten"]}
-    assert profil == {"Hat einen Hund namens Tim": "haustiere", "War im Oktober auf Mallorca": "reisen"}
+    assert profil == {"Sport": "interessen", "Hat einen Hund namens Tim": "haustiere", "War im Oktober auf Mallorca": "reisen"}
     eintraege = client.get("/api/vermittler/4251/obsidian/inhalt").json()["eintraege"]
     notiz = next(e for e in eintraege if e["frontmatter"]["quelle"] == "chat")
     assert "Praxisfinanzierung 2027" in notiz["inhalt"] and "- [ ] Konditionen schicken" in notiz["inhalt"]
@@ -534,3 +535,33 @@ def test_chat_antwort_enthaelt_partner_links(client):
     reply = client.post(f"/api/chat/conversations/{conversation['id']}/messages",
                         json={"inhalt": "Zeig mir die Partnerakte von Hans Baumann"}, headers=BROWSER_A).json()
     assert "[Dr. Hans Baumann](partner:4251)" in reply["message"]["content"]
+
+
+def test_interessen_aus_db_im_obsidian_profil(client):
+    from backend import obsidian
+    # Import hat die DB-Interessen ins Profil uebernommen (oben unter "## Interessen")
+    profil_path = settings.vault_path / obsidian.profil_rel(4251)
+    text = profil_path.read_text(encoding="utf-8")
+    assert text.index("## Interessen") < text.index("## Familie") and "- Sport" in text
+    assert client.get("/api/vermittler/4251").json()["interessen_profil"] == ["Sport"]
+
+    # Per Chat/API ergaenzte Interessen erscheinen zusaetzlich, Stichwort-Erkennung inklusive
+    r = client.post("/api/vermittler/4251/profil/fakten", json={"text": "Interessiert sich für Praxisgründung"})
+    assert r.json()["kategorie"] == "interessen"
+    client.post("/api/vermittler/4251/profil/fakten", json={"text": "Golf", "kategorie": "interessen"})
+    assert client.get("/api/vermittler/4251").json()["interessen_profil"] == [
+        "Sport", "Interessiert sich für Praxisgründung", "Golf"]
+
+    # Neue Interessen in der DB werden ergaenzt, ohne Doppelte; im Profil Geloeschtes bleibt geloescht
+    client.patch("/api/vermittler/4251", json={"interessen": ["Sport", "Golf", "Segeln"]})
+    assert client.get("/api/vermittler/4251").json()["interessen_profil"] == [
+        "Sport", "Interessiert sich für Praxisgründung", "Golf", "Segeln"]
+    text = profil_path.read_text(encoding="utf-8")
+    assert text.count("- Sport") == 1 and text.count("Golf") == 1
+
+    # Alte Profile ohne "## Interessen" bekommen die Ueberschrift oben eingefuegt
+    alt = text.split("## Interessen")[0] + "## Familie" + text.split("## Familie")[1]
+    profil_path.write_text(alt, encoding="utf-8")
+    assert client.get("/api/vermittler/4251").json()["interessen_profil"] == ["Sport", "Golf", "Segeln"]
+    neu = profil_path.read_text(encoding="utf-8")
+    assert neu.index("## Interessen") < neu.index("## Familie")

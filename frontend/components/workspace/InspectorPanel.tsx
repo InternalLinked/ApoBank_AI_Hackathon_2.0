@@ -2,7 +2,6 @@ import { FormEvent, useState } from "react";
 import type { ExtractedFinding, ManualEntryInput, PartnerDetail, PartnerSummary, WorkspaceApi } from "@/lib/workspace-contracts";
 import { Icon } from "./Icons";
 import { ObsidianGraph } from "./ObsidianGraph";
-import { PersonalProfile } from "./PersonalProfile";
 
 type InspectorPanelProps = {
   partner: PartnerSummary | null;
@@ -25,7 +24,6 @@ export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, o
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState("");
-  const [graphVersion, setGraphVersion] = useState(0);
   const pending = findings.filter((finding) => finding.status === "new");
 
   function openAdd(kind?: "partner" | "note") {
@@ -121,12 +119,14 @@ export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, o
         </dl>
         {partnerDetail.businessFigures[0] && <div className="partner-figure"><span>Volumen {partnerDetail.businessFigures[0].year}</span><strong>{new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(partnerDetail.businessFigures[0].volume)}</strong><small>{partnerDetail.businessFigures[0].loanCount} Darlehen</small></div>}
         <VolumeHistory figures={partnerDetail.businessFigures} />
-        {partnerDetail.interests.length > 0 && <div className="partner-tags">{partnerDetail.interests.slice(0, 3).map((interest) => <span key={interest}>{interest}</span>)}</div>}
+        {partnerDetail.interests.length > 0 && <div className="partner-interests">
+          <span className="partner-interests-label" title="Aus dem Obsidian-Profil: Datenbank-Interessen plus im Chat ergänzte">Interessen</span>
+          <div className="partner-tags">{partnerDetail.interests.map((interest) => <span key={interest}>{interest}</span>)}</div>
+        </div>}
       </section>}
 
-      {partner && <PersonalProfile api={api} vermittlerNr={partner.vermittlerNr} partnerName={partner.name} refreshKey={profileRefreshKey} onError={onError} onChanged={() => setGraphVersion((version) => version + 1)} />}
-
-      {partner && <ObsidianGraph api={api} vermittlerNr={partner.vermittlerNr} refreshKey={profileRefreshKey + graphVersion} onError={onError} />}
+      {/* Persönliches wird nur über den Chat erfasst; das Netz zeigt, was in Obsidian steht. */}
+      {partner && <ObsidianGraph api={api} vermittlerNr={partner.vermittlerNr} refreshKey={profileRefreshKey} onError={onError} />}
 
       <div className="inspector-tabs inspector-tabs-single" aria-label="Partnerakten-Bereich">
         <span><Icon name="sparkle" size={15} />Aus dem Chat gespeichert{pending.length > 0 && <span className="tab-count">{pending.length}</span>}</span>

@@ -201,7 +201,12 @@ Filter: `marktgebiet`, `filial_nr`, `mitarbeiter_id`, `status`.
 | DELETE | `/api/vermittler/{nr}/profil/fakten/{id}` | Info entfernen |
 | GET | `/api/vermittler/{nr}/obsidian/netz` | Lokaler Graph: `knoten[]` (`id`, `label`, `typ`, `uri`), `kanten[]` – Hub, Profil, Infos, Einträge, Betreuer/Filiale, Wiki- und Backlinks |
 
-Profil-Kategorien: `familie | haustiere | hobbys | reisen | vorlieben | termine | sonstiges`.
+Profil-Kategorien: `interessen | familie | haustiere | hobbys | reisen | vorlieben | termine | sonstiges`.
+**Interessen:** Die DB-Spalte `vermittler.interessen` wird automatisch ins Profil (`## Interessen`) übernommen – bei
+jedem Sync und beim Lesen von Akte/Profil/Netz (`obsidian.sync_interessen`, nur ergänzend, keine Doppelten).
+`GET /api/vermittler/{nr}` liefert zusätzlich `interessen_profil` (alle Interessen aus Obsidian, inkl. per Chat
+ergänzter); die Partnerakte im Frontend zeigt diese. Persönliches erfasst der Nutzer **nur über den Chat** –
+die Oberfläche hat dafür kein eigenes Eingabefeld (die `profil/fakten`-Endpunkte bleiben für Agenten/Skripte).
 Das Profil steckt auch in `kontext_text` und im Copilot-Werkzeug `hole_partnerakte` (`persoenliches_profil`).
 Der OpenAI-Chat (`backend/openai_copilot.py`) speichert über sein Werkzeug `im_obsidian_speichern` **sofort und
 ohne Rückfrage** ins Obsidian-Netz: `gruppe = "persoenlich"` → Profil, sonst → Notiz-Eintrag (`next-step` → Maßnahme).

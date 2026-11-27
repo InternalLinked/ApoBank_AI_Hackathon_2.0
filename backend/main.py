@@ -359,7 +359,19 @@ def list_vermittler(
 
 @app.get("/api/vermittler/{vermittler_nr}", tags=["Vermittler"], summary="Vollstaendiges Vermittlerprofil")
 def get_vermittler(vermittler_nr: int, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
-    return _require(conn, vermittler_nr)
+    """`interessen` = DB-Spalte; `interessen_profil` = Interessen aus dem Obsidian-Profil
+    (DB-Werte werden dort automatisch uebernommen, per Chat/Obsidian ergaenzte kommen hinzu)."""
+    v = _require(conn, vermittler_nr)
+    _profil_sicherstellen(v)
+    return {**v, "interessen_profil": obsidian.profil_interessen(vermittler_nr)}
+
+
+def _profil_sicherstellen(v: dict[str, Any]) -> None:
+    """Hub + Profil anlegen, falls sie fehlen, und DB-Interessen ins Profil uebernehmen."""
+    if not obsidian.abs_path(obsidian.hub_rel(v["vermittler_nr"])).exists():
+        obsidian.sync_hub(v)
+    else:
+        obsidian.ensure_profil(v)
 
 
 @app.get("/api/vermittler/{vermittler_nr}/kontext", tags=["Vermittler"],
@@ -793,8 +805,7 @@ def get_obsidian_netz(vermittler_nr: int, conn: Conn = Depends(db.get_conn)) -> 
     """Hub, Profil mit persoenlichen Infos, Eintraege, Betreuer/Filiale und per Wikilink verbundene Notizen.
     Knoten mit `uri` lassen sich per `obsidian://` in Obsidian oeffnen."""
     v = _require(conn, vermittler_nr)
-    if not obsidian.abs_path(obsidian.hub_rel(vermittler_nr)).exists():
-        obsidian.sync_hub(v)
+    _profil_sicherstellen(v)
     return obsidian.netz(v)
 
 
@@ -803,8 +814,7 @@ def get_obsidian_netz(vermittler_nr: int, conn: Conn = Depends(db.get_conn)) -> 
 def get_profil(vermittler_nr: int, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
     """Liest die Obsidian-Notiz `VM-<nr> Profil.md`, legt sie bei Bedarf an. Auch in Obsidian ergaenzte Zeilen erscheinen."""
     v = _require(conn, vermittler_nr)
-    if not obsidian.abs_path(obsidian.profil_rel(vermittler_nr)).exists():
-        obsidian.sync_hub(v)
+    _profil_sicherstellen(v)
     return {"vermittler_nr": vermittler_nr, "anzeigename": v["anzeigename"], **obsidian.read_profil(vermittler_nr)}
 
 

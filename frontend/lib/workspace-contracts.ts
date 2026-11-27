@@ -92,7 +92,7 @@ export type PartnerDetail = PartnerSummary & {
   }>;
 };
 
-export type ProfileCategory = "familie" | "haustiere" | "hobbys" | "reisen" | "vorlieben" | "termine" | "sonstiges";
+export type ProfileCategory = "interessen" | "familie" | "haustiere" | "hobbys" | "reisen" | "vorlieben" | "termine" | "sonstiges";
 
 /** Eine persönliche Info aus dem Obsidian-Profil (z. B. „Hat einen Hund namens Tim“). */
 export type ProfileFact = {

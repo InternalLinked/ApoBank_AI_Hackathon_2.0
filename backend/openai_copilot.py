@@ -66,9 +66,10 @@ Stammdaten und Geschaeftszahlen kannst du nicht aendern; sag das dem Nutzer.
 
 Gruppen beim Speichern:
 - "persoenlich": Privates fuer das persoenliche Profil (z. B. "war gerade auf
-  Mallorca", "hat einen Hund namens Tim"). label = Kategorie (Familie, Haustiere,
+  Mallorca", "hat einen Hund namens Tim"). label = Kategorie (Interessen, Familie, Haustiere,
   Hobbys & Freizeit, Reisen & Urlaub, Vorlieben & Gespraechsstil, Wichtige Daten,
-  Sonstiges), wert = die Info als kurzer Satz in dritter Person.
+  Sonstiges), wert = die Info als kurzer Satz in dritter Person. Ausnahme Interessen
+  (z. B. "interessiert sich fuer Golf"): label "Interessen", wert nur das Stichwort ("Golf").
 - "partner" / "business": Gespraechsinhalte bzw. geschaeftliche Angaben -> Notiz.
 - "next-step": vereinbarte naechste Schritte -> Massnahme in der Notiz.
 
@@ -608,6 +609,7 @@ def _execute_tool(conn: sqlite3.Connection, name: str, arguments: dict[str, Any]
         profile = db.get_vermittler_full(conn, nr)
         if profile is None:
             return {"fehler": "Vermittler nicht gefunden"}, None, [], "Partnerakte"
+        obsidian.ensure_profil(profile)  # uebernimmt DB-Interessen ins Profil
         profil = obsidian.read_profil(nr)
         email = (profile.get("kontakt") or {}).get("email")
         links = {

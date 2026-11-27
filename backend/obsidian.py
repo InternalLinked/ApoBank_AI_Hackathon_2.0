@@ -293,6 +293,7 @@ def sync_hub(v: dict[str, Any]) -> dict[str, str]:
 # Zeilen an oder entfernt einzelne Zeilen, Bearbeitungen in Obsidian bleiben erhalten.
 
 PROFIL_KATEGORIEN: dict[str, str] = {
+    "interessen": "Interessen",  # Startwerte aus der DB-Spalte vermittler.interessen, per Chat erweiterbar
     "familie": "Familie",
     "haustiere": "Haustiere",
     "hobbys": "Hobbys & Freizeit",
@@ -303,6 +304,7 @@ PROFIL_KATEGORIEN: dict[str, str] = {
 }
 
 _KATEGORIE_STICHWORTE: dict[str, tuple[str, ...]] = {
+    "interessen": ("interessiert", "interesse an", "interessen", "begeistert sich"),
     "haustiere": ("hund", "katze", "kater", "pferd", "haustier", "welpe", "papagei", "hamster", "kaninchen"),
     "reisen": ("urlaub", "reise", "verreist", "ferien", "flug", "kreuzfahrt", "mallorca", "italien", "strand"),
     "familie": ("tochter", "sohn", "kinder", "kind ", "ehefrau", "ehemann", "frau ", "mann ", "verheiratet",
@@ -353,6 +355,7 @@ def ensure_profil(v: dict[str, Any]) -> str:
     rel = profil_rel(nr)
     path = abs_path(rel)
     if path.exists():
+        sync_interessen(v)
         return rel
     path.parent.mkdir(parents=True, exist_ok=True)
     fm = render_frontmatter({
@@ -369,7 +372,60 @@ def ensure_profil(v: dict[str, Any]) -> str:
     for label in PROFIL_KATEGORIEN.values():
         parts += [f"## {label}", ""]
     path.write_text("\n".join(parts), encoding="utf-8")
+    sync_interessen(v)
     return rel
+
+
+def _zeilen_einfuegen(path: Path, kategorie: str, neue: list[str]) -> None:
+    """Fuegt Zeilen am Ende der Kategorie ein; fehlt die Ueberschrift, wird sie angelegt
+    (Interessen oben vor der ersten Kategorie, alles andere am Ende der Notiz)."""
+    label = PROFIL_KATEGORIEN.get(kategorie, PROFIL_KATEGORIEN["sonstiges"])
+    lines = path.read_text(encoding="utf-8").splitlines()
+    try:
+        start = next(i for i, z in enumerate(lines) if z.startswith("## ") and _kategorie_slug(z[3:]) == kategorie)
+    except StopIteration:
+        erste = next((i for i, z in enumerate(lines) if z.startswith("## ")), None)
+        if kategorie == "interessen" and erste is not None:
+            lines[erste:erste] = [f"## {label}", ""]
+            start = erste
+        else:
+            lines += ["", f"## {label}", ""]
+            start = len(lines) - 2
+    ende = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    letzte = max((i for i in range(start + 1, ende) if lines[i].startswith("- ")), default=start)
+    lines[letzte + 1:letzte + 1] = neue
+    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
+def sync_interessen(v: dict[str, Any]) -> int:
+    """Uebernimmt die Interessen aus der Datenbank (Spalte `interessen`) ins Profil.
+
+    Nur ergaenzend: Was schon im Profil steht (gleich geschrieben, egal welche Kategorie), wird nicht
+    doppelt angelegt; im Profil entfernte oder ergaenzte Interessen bleiben unangetastet. Gibt die
+    Anzahl neu eingetragener Interessen zurueck.
+    """
+    nr = v["vermittler_nr"]
+    path = abs_path(profil_rel(nr))
+    interessen = v.get("interessen") or []
+    if isinstance(interessen, str):
+        interessen = [i.strip() for i in interessen.split(",")]
+    if not path.exists() or not interessen:
+        return 0
+    vorhanden = {f["text"].strip().lower() for f in read_profil(nr)["fakten"]}
+    neue = []
+    for interesse in interessen:
+        interesse = " ".join(str(interesse).split())
+        if interesse and interesse.lower() not in vorhanden:
+            neue.append(f"- {interesse}")
+            vorhanden.add(interesse.lower())
+    if neue:
+        _zeilen_einfuegen(path, "interessen", neue)
+    return len(neue)
+
+
+def profil_interessen(vermittler_nr: int) -> list[str]:
+    """Alle Interessen aus dem Obsidian-Profil (DB-Startwerte + per Chat/Obsidian ergaenzte)."""
+    return [f["text"] for f in read_profil(vermittler_nr)["fakten"] if f["kategorie"] == "interessen"]
 
 
 def read_profil(vermittler_nr: int) -> dict[str, Any]:
@@ -411,18 +467,7 @@ def add_profil_fakt(v: dict[str, Any], text: str, kategorie: str | None = None,
     kategorie = kategorie or kategorie_erkennen(text)
     label = PROFIL_KATEGORIEN.get(kategorie, PROFIL_KATEGORIEN["sonstiges"])
     kategorie = _kategorie_slug(label)
-    zeile = f"- {text} · {(datum or date.today()).isoformat()}"
-
-    lines = path.read_text(encoding="utf-8").splitlines()
-    try:
-        start = next(i for i, z in enumerate(lines) if z.startswith("## ") and _kategorie_slug(z[3:]) == kategorie)
-    except StopIteration:
-        lines += ["", f"## {label}", ""]
-        start = len(lines) - 2
-    ende = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
-    letzte = max((i for i in range(start + 1, ende) if lines[i].startswith("- ")), default=start)
-    lines.insert(letzte + 1, zeile)
-    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    _zeilen_einfuegen(path, kategorie, [f"- {text} · {(datum or date.today()).isoformat()}"])
     return next(f for f in reversed(read_profil(nr)["fakten"]) if f["text"] == text and f["kategorie"] == kategorie)
 
 

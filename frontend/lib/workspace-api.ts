@@ -314,7 +314,9 @@ function toPartnerDetail(value: unknown): PartnerDetail | null {
     location: [contact.plz, contact.ort].filter(Boolean).join(" "),
     branch: String(betreuung.filiale ?? ""),
     marketArea: String(betreuung.marktgebiet ?? ""),
-    interests: Array.isArray(item.interessen) ? item.interessen.map(String) : [],
+    // Interessen aus dem Obsidian-Profil (DB-Werte + im Chat ergänzte); Fallback: DB-Spalte
+    interests: Array.isArray(item.interessen_profil) ? item.interessen_profil.map(String)
+      : Array.isArray(item.interessen) ? item.interessen.map(String) : [],
     obsidianUri: String(record(item.obsidian).uri ?? ""),
     businessFigures: figures.map((figure) => ({
       year: Number(figure.jahr ?? 0),
@@ -338,6 +340,7 @@ function toProfileFact(value: unknown): ProfileFact {
 /** Ordnet das vom Copilot gelieferte Label („Haustiere“, „Reisen & Urlaub“ …) einer Profil-Kategorie zu. */
 function categoryFromLabel(label: string): ProfileCategory | undefined {
   const value = label.toLocaleLowerCase("de-DE");
+  if (value.includes("interesse")) return "interessen";
   if (value.includes("famil")) return "familie";
   if (value.includes("haustier") || value.includes("tier")) return "haustiere";
   if (value.includes("hobby") || value.includes("freizeit")) return "hobbys";

@@ -83,7 +83,7 @@ class ZusammenfassungIn(BaseModel):
     quelle: str | None = Field(None, examples=["claude-opus-5-5"])
 
 
-ProfilKategorie = Literal["familie", "haustiere", "hobbys", "reisen", "vorlieben", "termine", "sonstiges"]
+ProfilKategorie = Literal["interessen", "familie", "haustiere", "hobbys", "reisen", "vorlieben", "termine", "sonstiges"]
 
 
 class ProfilFaktIn(BaseModel):
