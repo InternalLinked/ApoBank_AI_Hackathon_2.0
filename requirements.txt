@@ -4,3 +4,5 @@ openpyxl>=3.1
 pydantic>=2.7
 httpx>=0.27
 pytest>=8
+# KI-Copilot (backend/copilot): Amazon Bedrock; ohne Bedrock (LLM_PROVIDER=fake) nicht erforderlich
+boto3>=1.40

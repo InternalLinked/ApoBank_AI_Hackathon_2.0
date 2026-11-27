@@ -9,3 +9,16 @@ vault/
 
 # Quelldaten des Hackathons nicht ins (oeffentliche) Repo
 data/*.xlsx
+
+# Lokale Konfiguration und Zugangsdaten nie committen (Repo ist oeffentlich)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.aws/
+credentials
+# Originalunterlagen / Dokumente des Kunden
+*.pdf
+*.docx
+data/*.csv
