@@ -27,8 +27,9 @@ export function Workspace() {
   const [toast, setToast] = useState("");
   const [partnerDetail, setPartnerDetail] = useState<PartnerDetail | null>(null);
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
-  // Rechte Leiste ohne geöffnete Akte: standardmäßig eingefahren (mehr Platz für den Chat), per Button einblendbar
-  const [inspectorPinned, setInspectorPinned] = useState(false);
+  // Rechte Leiste ist standardmäßig eingefahren und öffnet sich nie automatisch (auch nicht, wenn der Copilot
+  // einen Vermittler findet) – nur per Klick auf einen Namen, einen Auswahl-Button oder den Knopf oben rechts.
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const partnerRequest = useRef(0);
 
@@ -241,24 +242,35 @@ export function Workspace() {
       status: "Aktiv",
     });
     setFindings([]);
+    openInspector();
+  }
+
+  /** Rechte Leiste öffnen – nur auf ausdrücklichen Klick des Nutzers, nie automatisch. */
+  function openInspector() {
+    setInspectorOpen(true);
     setMobileDrawer((current) => (current === null && window.matchMedia("(max-width: 900px)").matches ? "details" : current));
   }
 
-  /** Klick auf einen Vermittlernamen im Chat-Text: Partnerakte rechts öffnen. */
-  /** Kreuz in der Partnerakte: Akte schließen (Chat bleibt offen, Akte lässt sich per Namen wieder öffnen). */
-  function closePartner() {
-    setInspectorPinned(false); // Leiste fährt ein, der Chat wird breiter
-    setCurrentPartner(null);
-    setFindings([]);
+  /** Leiste einfahren (die geladene Akte bleibt im Hintergrund erhalten). */
+  function hideInspector() {
+    setInspectorOpen(false);
     setMobileDrawer((current) => (current === "details" ? null : current));
   }
 
+  /** Kreuz in der Partnerakte: Akte schließen (Chat bleibt offen, Akte lässt sich per Namen wieder öffnen). */
+  function closePartner() {
+    hideInspector(); // Leiste fährt ein, der Chat wird breiter
+    setCurrentPartner(null);
+    setFindings([]);
+  }
+
+  /** Klick auf einen Vermittlernamen im Chat-Text: Partnerakte rechts öffnen. */
   function openPartnerFromLink(vermittlerNr: number, name: string) {
     if (snapshot.partner?.vermittlerNr !== vermittlerNr) {
       selectCandidate({ vermittlerNr, name });
       return;
     }
-    setMobileDrawer((current) => (current === null && window.matchMedia("(max-width: 900px)").matches ? "details" : current));
+    openInspector();
   }
 
   function selectConversation(conversationId: string) {
@@ -269,14 +281,14 @@ export function Workspace() {
     setCurrentPartner(selectedPartner ?? null);
   }
 
-  const inspectorCollapsed = !snapshot.partner && !inspectorPinned;
+  const inspectorCollapsed = !inspectorOpen;
 
   return (
     <div className={`workspace-shell ${inspectorCollapsed ? "inspector-collapsed" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       {mobileDrawer && <button className="mobile-backdrop" aria-label="Seitenleiste schließen" onClick={() => setMobileDrawer(null)} />}
       <ChatSidebar accountName={snapshot.accountName} conversations={snapshot.conversations} activeConversationId={activeConversationId} mobileOpen={mobileDrawer === "chats"} onCloseMobile={() => setMobileDrawer(null)} onSelect={selectConversation} onNewConversation={createConversation} onDelete={deleteConversation} />
-      <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)} onOpenDetails={() => setMobileDrawer("details")} inspectorCollapsed={inspectorCollapsed} onExpandInspector={() => setInspectorPinned(true)} onSelectCandidate={selectCandidate} onOpenPartner={openPartnerFromLink} onTranscribe={transcribeAudio} onError={setToast} onConfirmProposal={confirmProposal} onRejectProposal={rejectProposal} />
-      <InspectorPanel partner={snapshot.partner} partnerDetail={partnerDetail} findings={findings} mobileOpen={mobileDrawer === "details"} onCloseMobile={() => { setInspectorPinned(false); setMobileDrawer(null); }} onSaveEntry={saveEntry} onConfirmFindings={confirmFindings} api={api} profileRefreshKey={profileRefreshKey} onError={setToast} onClosePartner={closePartner} />
+      <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)} onOpenDetails={openInspector} inspectorCollapsed={inspectorCollapsed} onExpandInspector={openInspector} onToggleInspector={() => (inspectorOpen ? hideInspector() : openInspector())} onSelectCandidate={selectCandidate} onOpenPartner={openPartnerFromLink} onTranscribe={transcribeAudio} onError={setToast} onConfirmProposal={confirmProposal} onRejectProposal={rejectProposal} />
+      <InspectorPanel partner={snapshot.partner} partnerDetail={partnerDetail} findings={findings} mobileOpen={mobileDrawer === "details"} onCloseMobile={hideInspector} onSaveEntry={saveEntry} onConfirmFindings={confirmFindings} api={api} profileRefreshKey={profileRefreshKey} onError={setToast} onClosePartner={closePartner} />
       {toast && <div className="toast" role="status"><Icon name="check" size={16} />{toast}<button onClick={() => setToast("")} aria-label="Hinweis schließen"><Icon name="close" size={15} /></button></div>}
     </div>
   );
