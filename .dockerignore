@@ -4,7 +4,8 @@
 Dockerfile
 .dockerignore
 Dateien/
-data/
+data/*
+!data/Musterliste_apoBank.xlsx
 vault/
 frontend/node_modules/
 frontend/.next/

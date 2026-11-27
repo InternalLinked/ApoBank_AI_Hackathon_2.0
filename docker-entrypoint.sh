@@ -2,7 +2,7 @@
 set -eu
 
 db_path="${APOBANK_DB_PATH:-/app/data/apobank.db}"
-excel_path="${APOBANK_EXCEL_PATH:-/app/data/Musterliste_apoBank.xlsx}"
+excel_path="${APOBANK_EXCEL_PATH:-/app/seed/Musterliste_apoBank.xlsx}"
 
 # A mounted, populated SQLite database always has priority. For a fresh or
 # still empty local database the supplied Excel file is imported before the API
