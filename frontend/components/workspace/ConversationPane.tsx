@@ -1,5 +1,5 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import type { ChatMessage, Conversation, PartnerSummary } from "@/lib/workspace-contracts";
+import type { ChatMessage, Conversation, PartnerCandidate, PartnerSummary } from "@/lib/workspace-contracts";
 import { Icon } from "./Icons";
 
 type ConversationPaneProps = {
@@ -11,9 +11,10 @@ type ConversationPaneProps = {
   onSend: (content: string) => void;
   onOpenChats: () => void;
   onOpenDetails: () => void;
+  onSelectCandidate: (candidate: PartnerCandidate) => void;
 };
 
-export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, onOpenDetails }: ConversationPaneProps) {
+export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, onOpenDetails, onSelectCandidate }: ConversationPaneProps) {
   const [value, setValue] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -67,6 +68,24 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
                   <p>{message.content}</p>
                   {message.metrics && <div className="metric-grid">{message.metrics.map((metric) => <div className={`metric-card tone-${metric.tone ?? "green"}`} key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.detail}</small></div>)}</div>}
                   {message.bullets && <ul className="message-bullets">{message.bullets.map((bullet) => <li key={bullet}><span className="bullet-dot" />{bullet}</li>)}</ul>}
+                  {message.candidates && (
+                    <div className="candidate-list" role="group" aria-label="Passende Vermittler auswählen">
+                      {message.candidates.map((candidate) => (
+                        <button
+                          type="button"
+                          key={candidate.vermittlerNr}
+                          className={`candidate-button ${partner?.vermittlerNr === candidate.vermittlerNr ? "is-selected" : ""}`}
+                          aria-pressed={partner?.vermittlerNr === candidate.vermittlerNr}
+                          onClick={() => onSelectCandidate(candidate)}
+                        >
+                          <strong>{candidate.name}</strong>
+                          {(candidate.company || candidate.location) && (
+                            <small>{[candidate.company, candidate.location].filter(Boolean).join(" · ")}</small>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {message.source && <div className="message-source"><Icon name="file" size={14} /><span>{message.source}</span><Icon name="chevron" size={13} /></div>}
                 </div>
                 {message.role === "assistant" && <div className="message-feedback"><button aria-label="Antwort kopieren" title="Antwort kopieren"><Icon name="file" size={14} /></button><button aria-label="Antwort hilfreich" title="Hilfreich"><Icon name="check" size={14} /></button></div>}

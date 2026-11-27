@@ -663,6 +663,7 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, client: str =
         "sources": reply.sources,
         "openai_configured": reply.configured,
         "fehler": reply.fehler,
+        "kandidaten": reply.kandidaten,  # Auswahl-Buttons bei mehreren Treffern; bleiben im Verlauf erhalten
     }
     cursor = conn.execute(
         "INSERT INTO chat_nachricht (konversation_id, rolle, inhalt, metadaten_json) VALUES (?, 'assistant', ?, ?)",
@@ -678,7 +679,7 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, client: str =
         "SELECT id, rolle, inhalt, metadaten_json, erstellt_am FROM chat_nachricht WHERE id = ?", (cursor.lastrowid,)
     ).fetchone()
     return {"message": _chat_message(message), "partner": partner, "findings": reply.findings,
-            "openai_configured": reply.configured, "fehler": reply.fehler}
+            "openai_configured": reply.configured, "fehler": reply.fehler, "kandidaten": reply.kandidaten}
 
 
 # =========================================================================== Obsidian-Gehirn

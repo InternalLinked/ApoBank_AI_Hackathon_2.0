@@ -24,6 +24,16 @@ export type ChatMessage = {
   findings?: ExtractedFinding[];
   partner?: PartnerSummary;
   aiConfigured?: boolean;
+  /** Mehrere passende Vermittler: werden als Auswahl-Buttons unter der Antwort angezeigt. */
+  candidates?: PartnerCandidate[];
+};
+
+export type PartnerCandidate = {
+  vermittlerNr: number;
+  /** Voller Name inkl. Titel, z. B. „Dr. Anna Scholz“ */
+  name: string;
+  company?: string;
+  location?: string;
 };
 
 export type FindingStatus = "new" | "confirmed";

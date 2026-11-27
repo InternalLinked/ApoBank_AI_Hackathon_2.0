@@ -4,6 +4,7 @@ import type {
   Conversation,
   ExtractedFinding,
   ManualEntryInput,
+  PartnerCandidate,
   PartnerDetail,
   PartnerSummary,
   SavedEntry,
@@ -196,10 +197,30 @@ function findingsFrom(value: unknown): ExtractedFinding[] {
     : [];
 }
 
+function toCandidate(value: unknown): PartnerCandidate | null {
+  const item = record(value);
+  const nr = item.vermittler_nr;
+  if (typeof nr !== "number") return null;
+  return {
+    vermittlerNr: nr,
+    name: String(item.name ?? `Vermittler ${nr}`),
+    company: typeof item.firma === "string" && item.firma ? item.firma : undefined,
+    location: typeof item.ort === "string" && item.ort ? item.ort : undefined,
+  };
+}
+
+function candidatesFrom(value: unknown): PartnerCandidate[] {
+  return Array.isArray(value)
+    ? value.map(toCandidate).filter((candidate): candidate is PartnerCandidate => candidate !== null)
+    : [];
+}
+
 function toMessage(value: unknown): ChatMessage {
   const item = record(value);
   const metadata = record(item.metadata);
+  const candidates = candidatesFrom(metadata.kandidaten);
   return {
+    candidates: candidates.length > 0 ? candidates : undefined,
     id: String(item.id ?? randomId()),
     role: item.role === "user" ? "user" : "assistant",
     content: String(item.content ?? ""),

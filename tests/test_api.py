@@ -49,6 +49,28 @@ def test_chat_loeschen(client):
     assert client.delete(f"/api/chat/conversations/{chat_id}", headers=BROWSER_A).status_code == 404
 
 
+def test_mehrdeutiger_name_liefert_auswahl_buttons(client, monkeypatch):
+    monkeypatch.setattr(settings, "openai_api_key", None)  # Datenbank-Fallback, kein OpenAI-Aufruf
+    for vorname in ("Anna", "Bernd"):
+        assert client.post("/api/vermittler", json={"vorname": vorname, "name": "Scholzmann",
+                                                    "titel": "Dr." if vorname == "Anna" else None}).status_code == 201
+    chat_id = client.post("/api/chat/conversations", json={"titel": "t"}, headers=BROWSER_A).json()["id"]
+
+    r = client.post(f"/api/chat/conversations/{chat_id}/messages", json={"inhalt": "Scholzmann"}, headers=BROWSER_A)
+    assert r.status_code == 200, r.text
+    kandidaten = r.json()["kandidaten"]
+    assert [k["name"] for k in kandidaten] == ["Dr. Anna Scholzmann", "Bernd Scholzmann"]
+    assert all(isinstance(k["vermittler_nr"], int) for k in kandidaten)
+
+    # Bleibt im Verlauf erhalten, damit die Buttons nach dem Neuladen wieder erscheinen
+    verlauf = client.get("/api/chat/workspace", headers=BROWSER_A).json()["messages_by_conversation"][chat_id]
+    assert verlauf[-1]["metadata"]["kandidaten"] == kandidaten
+
+    # Eindeutiger Treffer: keine Buttons, direkt die Partnerakte
+    r = client.post(f"/api/chat/conversations/{chat_id}/messages", json={"inhalt": "Bernd Scholzmann"}, headers=BROWSER_A)
+    assert r.json()["kandidaten"] == [] and r.json()["partner"]["name"].endswith("Scholzmann")
+
+
 def test_chats_sind_pro_browser_getrennt(client):
     chat_a = client.post("/api/chat/conversations", json={"titel": "Von A"}, headers=BROWSER_A).json()["id"]
     chat_b = client.post("/api/chat/conversations", json={"titel": "Von B"}, headers=BROWSER_B).json()["id"]

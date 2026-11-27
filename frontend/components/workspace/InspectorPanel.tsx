@@ -110,7 +110,7 @@ export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, o
           <div><dt>Vermittler-ID</dt><dd>{partnerDetail.partnerId}</dd></div>
           <div><dt>Unternehmen</dt><dd>{partnerDetail.company}</dd></div>
           {partnerDetail.location && <div><dt>Standort</dt><dd>{partnerDetail.location}</dd></div>}
-          {partnerDetail.email && <div><dt>E-Mail</dt><dd>{partnerDetail.email}</dd></div>}
+          {partnerDetail.email && <div><dt>E-Mail</dt><dd className="email-value"><span title={partnerDetail.email}>{partnerDetail.email}</span><CopyButton value={partnerDetail.email} label="E-Mail-Adresse kopieren" /></dd></div>}
           {partnerDetail.branch && <div><dt>Filiale</dt><dd>{partnerDetail.branch}{partnerDetail.marketArea ? ` · ${partnerDetail.marketArea}` : ""}</dd></div>}
         </dl>
         {partnerDetail.businessFigures[0] && <div className="partner-figure"><span>Volumen {partnerDetail.businessFigures[0].year}</span><strong>{new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(partnerDetail.businessFigures[0].volume)}</strong><small>{partnerDetail.businessFigures[0].loanCount} Darlehen</small></div>}
@@ -166,6 +166,33 @@ export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, o
         </section>
       </div>}
     </aside>
+  );
+}
+
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      const helper = document.createElement("textarea");
+      helper.value = value;
+      helper.style.position = "fixed";
+      helper.style.opacity = "0";
+      document.body.appendChild(helper);
+      helper.select();
+      document.execCommand("copy");
+      helper.remove();
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <button type="button" className={`copy-button ${copied ? "is-copied" : ""}`} onClick={copy} aria-label={label} title={copied ? "Kopiert" : label}>
+      <Icon name={copied ? "check" : "copy"} size={12} />
+    </button>
   );
 }
 

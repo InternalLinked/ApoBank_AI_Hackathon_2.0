@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createWorkspaceApi } from "@/lib/workspace-api";
-import type { ChatMessage, ExtractedFinding, ManualEntryInput, PartnerDetail, PartnerSummary, WorkspaceApi, WorkspaceSnapshot } from "@/lib/workspace-contracts";
+import type { ChatMessage, ExtractedFinding, ManualEntryInput, PartnerCandidate, PartnerDetail, PartnerSummary, WorkspaceApi, WorkspaceSnapshot } from "@/lib/workspace-contracts";
 import { ChatSidebar } from "./ChatSidebar";
 import { ConversationPane } from "./ConversationPane";
 import { InspectorPanel } from "./InspectorPanel";
@@ -181,6 +181,20 @@ export function Workspace() {
     setToast("Die bestätigten Angaben wurden als Notiz in der Partnerakte gespeichert.");
   }
 
+  function selectCandidate(candidate: PartnerCandidate) {
+    // Vorläufige Zusammenfassung sofort zeigen; loadPartnerDetail ersetzt sie durch die vollständige Akte.
+    setCurrentPartner({
+      vermittlerNr: candidate.vermittlerNr,
+      name: candidate.name,
+      company: candidate.company ?? "Kein Unternehmen hinterlegt",
+      partnerId: `VM-${candidate.vermittlerNr}`,
+      relationshipManager: "Wird geladen …",
+      status: "Aktiv",
+    });
+    setFindings([]);
+    setMobileDrawer((current) => (current === null && window.matchMedia("(max-width: 900px)").matches ? "details" : current));
+  }
+
   function selectConversation(conversationId: string) {
     setActiveConversationId(conversationId);
     const latest = [...(snapshot.messagesByConversation[conversationId] ?? [])].reverse().find((message) => message.role === "assistant");
@@ -193,7 +207,7 @@ export function Workspace() {
     <div className="workspace-shell">
       {mobileDrawer && <button className="mobile-backdrop" aria-label="Seitenleiste schließen" onClick={() => setMobileDrawer(null)} />}
       <ChatSidebar conversations={snapshot.conversations} activeConversationId={activeConversationId} mobileOpen={mobileDrawer === "chats"} onCloseMobile={() => setMobileDrawer(null)} onSelect={selectConversation} onNewConversation={createConversation} onDelete={deleteConversation} />
-      <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} onOpenDetails={() => setMobileDrawer("details")} />
+      <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} onOpenDetails={() => setMobileDrawer("details")} onSelectCandidate={selectCandidate} />
       <InspectorPanel partner={snapshot.partner} partnerDetail={partnerDetail} findings={findings} mobileOpen={mobileDrawer === "details"} onCloseMobile={() => setMobileDrawer(null)} onSaveEntry={saveEntry} onConfirmFindings={confirmFindings} />
       {toast && <div className="toast" role="status"><Icon name="check" size={16} />{toast}<button onClick={() => setToast("")} aria-label="Hinweis schließen"><Icon name="close" size={15} /></button></div>}
     </div>
