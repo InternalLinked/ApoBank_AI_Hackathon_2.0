@@ -246,6 +246,9 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 .inspector-heading p { margin: 0; color: #708198; font-size: 12.5px; }
 .inspector-heading p span { padding: 0 2px; color: #c0c8c4; }
 .inspector-close { display: none; color: #667b9a; }
+.partner-close { width: 32px; height: 32px; border: 1px solid #dce6f3; border-radius: 8px; color: #667b9a; background: #fff; }
+.partner-close:hover { color: #17427f; background: #f2f6fd; border-color: #c6d6ec; }
+.partner-close:focus-visible { outline: 2px solid #5b8fd6; outline-offset: 1px; } /* Kreuz: Partnerakte schließen */
 .partner-status-row { display: flex; align-items: center; gap: 6px; margin: 0 20px 16px; color: #6b7d95; font-size: 11px; }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #2f6eb8; box-shadow: 0 0 0 3px #eaf1fb; }
 .status-separator { color: #c1cac6; }
@@ -539,3 +542,26 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 .partner-interests { margin-top: 10px; }
 .partner-interests-label { display: block; color: #8192aa; font-size: 10px; }
 .partner-interests .partner-tags { margin-top: 4px; }
+
+/* Rechte Leiste einfahren, wenn keine Partnerakte offen ist – der Chat bekommt den Platz.
+   Die Leiste behält ihre Breite und gleitet nach rechts aus dem Bild (Spalte animiert auf 0). */
+.panel-expand { display: none; color: #6c7c7e; }
+@media (min-width: 901px) {
+  .workspace-shell { transition: grid-template-columns .32s cubic-bezier(.2,.8,.28,1); }
+  .inspector-panel { width: 400px; justify-self: start; transition: opacity .25s ease, box-shadow .25s ease; }
+  .workspace-shell.inspector-collapsed { grid-template-columns: 280px minmax(500px, 1fr) 0px; }
+  .workspace-shell.inspector-collapsed .inspector-panel { opacity: 0; pointer-events: none; }
+  .workspace-shell.inspector-collapsed .panel-expand { display: inline-grid; }
+  .inspector-close.is-visible { display: inline-grid; }
+}
+@media (min-width: 901px) and (max-width: 1320px) {
+  .inspector-panel { width: 340px; }
+  .workspace-shell.inspector-collapsed { grid-template-columns: 240px minmax(440px, 1fr) 0px; }
+}
+@media (min-width: 901px) and (max-width: 1080px) {
+  .inspector-panel { width: 318px; }
+  .workspace-shell.inspector-collapsed { grid-template-columns: 224px minmax(390px, 1fr) 0px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .workspace-shell, .inspector-panel { transition: none; } /* ohne Animation */
+}

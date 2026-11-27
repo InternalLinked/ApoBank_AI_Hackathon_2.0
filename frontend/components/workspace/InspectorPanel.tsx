@@ -14,9 +14,11 @@ type InspectorPanelProps = {
   api: WorkspaceApi;
   profileRefreshKey: number;
   onError: (message: string) => void;
+  /** Schließt die geöffnete Partnerakte (rechts wird wieder „Noch keine Akte“ angezeigt). */
+  onClosePartner: () => void;
 };
 
-export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, onCloseMobile, onSaveEntry, onConfirmFindings, api, profileRefreshKey, onError }: InspectorPanelProps) {
+export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, onCloseMobile, onSaveEntry, onConfirmFindings, api, profileRefreshKey, onError, onClosePartner }: InspectorPanelProps) {
   const today = new Date().toISOString().slice(0, 10);
   const [addOpen, setAddOpen] = useState(false);
   const [entryKind, setEntryKind] = useState<"partner" | "note">("partner");
@@ -103,7 +105,9 @@ export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, o
         </div>
         <div className="inspector-actions">
           <button className="add-entry-button" type="button" onClick={() => openAdd()}><Icon name="plus" size={16} /><span>Hinzufügen</span></button>
-          <button className="icon-button inspector-close" aria-label="Details schließen" onClick={onCloseMobile}><Icon name="close" /></button>
+          {partner
+            ? <button className="icon-button partner-close" type="button" aria-label="Partnerakte schließen" title="Partnerakte schließen" onClick={onClosePartner}><Icon name="close" size={17} /></button>
+            : <button className="icon-button inspector-close is-visible" type="button" aria-label="Leiste einfahren" title="Leiste einfahren" onClick={onCloseMobile}><Icon name="close" /></button>}
         </div>
       </div>
       {partner && <div className="partner-status-row"><span className="status-dot" />{partner.status}<span className="status-separator">·</span><span>Betreut von {partner.relationshipManager}</span></div>}
