@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createWorkspaceApi, errorMessage } from "@/lib/workspace-api";
-import type { ChatMessage, ExtractedFinding, ManualEntryInput, PartnerCandidate, PartnerDetail, PartnerSummary, WorkspaceApi, WorkspaceSnapshot } from "@/lib/workspace-contracts";
+import type { ChangeProposal, ChatMessage, ExtractedFinding, ManualEntryInput, PartnerCandidate, PartnerDetail, PartnerSummary, WorkspaceApi, WorkspaceSnapshot } from "@/lib/workspace-contracts";
 import { ChatSidebar } from "./ChatSidebar";
 import { ConversationPane } from "./ConversationPane";
 import { InspectorPanel } from "./InspectorPanel";
@@ -55,6 +55,31 @@ export function Workspace() {
 
   function showError(error: unknown, fallback: string) {
     setToast(error instanceof Error ? error.message : fallback);
+  }
+
+  /** Änderungsvorschlag der KI ausführen; danach Partnerakte und Profil neu laden, damit die neuen Werte sichtbar sind */
+  async function confirmProposal(proposal: ChangeProposal): Promise<boolean> {
+    try {
+      const { partner } = await api.confirmProposal(proposal.id);
+      setToast(`${proposal.changes.length} ${proposal.changes.length === 1 ? "Änderung" : "Änderungen"} für ${proposal.vermittler} gespeichert.`);
+      if (partner) setCurrentPartner(partner);
+      setProfileRefreshKey((key) => key + 1);
+      return true;
+    } catch (error) {
+      setToast(errorMessage(error, "Die Änderungen konnten nicht gespeichert werden."));
+      return false;
+    }
+  }
+
+  async function rejectProposal(proposal: ChangeProposal): Promise<boolean> {
+    try {
+      await api.rejectProposal(proposal.id);
+      setToast("Änderungsvorschlag verworfen – nichts gespeichert.");
+      return true;
+    } catch (error) {
+      setToast(errorMessage(error, "Der Vorschlag konnte nicht verworfen werden."));
+      return false;
+    }
   }
 
   /** Mikrofon → Amazon Transcribe; Fehler mit Code/Ref (z. B. TRANSCRIBE_RECHTE), damit sie im Log auffindbar sind */
@@ -244,7 +269,7 @@ export function Workspace() {
     <div className={`workspace-shell ${inspectorCollapsed ? "inspector-collapsed" : ""}`}>
       {mobileDrawer && <button className="mobile-backdrop" aria-label="Seitenleiste schließen" onClick={() => setMobileDrawer(null)} />}
       <ChatSidebar conversations={snapshot.conversations} activeConversationId={activeConversationId} mobileOpen={mobileDrawer === "chats"} onCloseMobile={() => setMobileDrawer(null)} onSelect={selectConversation} onNewConversation={createConversation} onDelete={deleteConversation} />
-      <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} onOpenDetails={() => setMobileDrawer("details")} inspectorCollapsed={inspectorCollapsed} onExpandInspector={() => setInspectorPinned(true)} onSelectCandidate={selectCandidate} onOpenPartner={openPartnerFromLink} onTranscribe={transcribeAudio} onError={setToast} />
+      <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} onOpenDetails={() => setMobileDrawer("details")} inspectorCollapsed={inspectorCollapsed} onExpandInspector={() => setInspectorPinned(true)} onSelectCandidate={selectCandidate} onOpenPartner={openPartnerFromLink} onTranscribe={transcribeAudio} onError={setToast} onConfirmProposal={confirmProposal} onRejectProposal={rejectProposal} />
       <InspectorPanel partner={snapshot.partner} partnerDetail={partnerDetail} findings={findings} mobileOpen={mobileDrawer === "details"} onCloseMobile={() => { setInspectorPinned(false); setMobileDrawer(null); }} onSaveEntry={saveEntry} onConfirmFindings={confirmFindings} api={api} profileRefreshKey={profileRefreshKey} onError={setToast} onClosePartner={closePartner} />
       {toast && <div className="toast" role="status"><Icon name="check" size={16} />{toast}<button onClick={() => setToast("")} aria-label="Hinweis schließen"><Icon name="close" size={15} /></button></div>}
     </div>

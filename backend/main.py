@@ -24,7 +24,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import db, obsidian, openai_copilot, vermittler_links, transcribe
+from . import aenderungen, db, obsidian, openai_copilot, transcribe, vermittler_links
 from .config import settings
 from .schemas import (ChatKonversationCreate, ChatNachrichtIn, EintragIn, GeschaeftszahlIn, ProfilFaktIn,
                       SqlQueryIn, VermittlerCreate, VermittlerUpdate, ZusammenfassungIn)
@@ -595,6 +595,12 @@ def get_chat_workspace(client: str = Depends(client_id), conn: Conn = Depends(db
             "WHERE konversation_id = ? ORDER BY id", (conversation["id"],)
         ).fetchall()
         messages[conversation["id"]] = [_chat_message(row) for row in rows]
+        # Aktuellen Status der Aenderungsvorschlaege (offen/bestaetigt/verworfen) in die Metadaten spiegeln
+        status = dict(conn.execute("SELECT id, status FROM chat_aenderung WHERE konversation_id = ?",
+                                   (conversation["id"],)).fetchall())
+        for message in messages[conversation["id"]]:
+            for vorschlag in message["metadata"].get("aenderungsvorschlaege") or []:
+                vorschlag["status"] = status.get(vorschlag.get("id"), vorschlag.get("status"))
     return {
         "conversations": conversations,
         "messages_by_conversation": messages,
@@ -653,6 +659,16 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, client: str =
     reply.content = vermittler_links.verlinke(
         conn, reply.content, [*reply.erwaehnte_nrs, reply.vermittler_nr, *(k.get("vermittler_nr") for k in reply.kandidaten)])
     partner = _partner_summary(db.get_vermittler_full(conn, reply.vermittler_nr)) if reply.vermittler_nr else None
+    # Aenderungsvorschlaege serverseitig ablegen: Bestaetigt wird spaeter nur, was hier gespeichert ist
+    # (der Browser kann den Inhalt nicht manipulieren, nur per ID bestaetigen).
+    vorschlaege = []
+    for vorschlag in reply.vorschlaege:
+        vorschlag_id = uuid4().hex[:12]
+        conn.execute(
+            "INSERT INTO chat_aenderung (id, konversation_id, client_id, vermittler_nr, vorschlag_json) VALUES (?, ?, ?, ?, ?)",
+            (vorschlag_id, conversation_id, client, vorschlag["vermittler_nr"], json.dumps(vorschlag, ensure_ascii=False)),
+        )
+        vorschlaege.append({**vorschlag, "id": vorschlag_id, "status": "offen"})
     metadata = {
         "findings": reply.findings,
         "vermittler_nr": reply.vermittler_nr,
@@ -662,6 +678,8 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, client: str =
         "fehler": reply.fehler,
         "kandidaten": reply.kandidaten,  # Auswahl-Buttons bei mehreren Treffern; bleiben im Verlauf erhalten
         "analysen": reply.analysen,      # SQL + Ergebnis + Diagramm-Angaben fuer den Tab "Analyse"
+        "aenderungsvorschlaege": vorschlaege,  # Tab "Aenderungen"; Status kommt beim Laden aus chat_aenderung
+        "modell": reply.modell,          # automatisch gewaehltes Modell + Dauer (Anzeige unter der Antwort)
     }
     cursor = conn.execute(
         "INSERT INTO chat_nachricht (konversation_id, rolle, inhalt, metadaten_json) VALUES (?, 'assistant', ?, ?)",
@@ -678,7 +696,46 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, client: str =
     ).fetchone()
     return {"message": _chat_message(message), "partner": partner, "findings": reply.findings,
             "openai_configured": reply.configured, "fehler": reply.fehler, "kandidaten": reply.kandidaten,
-            "analysen": reply.analysen}
+            "analysen": reply.analysen, "aenderungsvorschlaege": vorschlaege, "modell": reply.modell}
+
+
+def _eigener_vorschlag(conn: Conn, vorschlag_id: str, client: str) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM chat_aenderung WHERE id = ? AND client_id = ?", (vorschlag_id, client)).fetchone()
+    if row is None:
+        raise HTTPException(404, "Aenderungsvorschlag nicht gefunden")
+    if row["status"] != "offen":
+        raise HTTPException(409, f"Dieser Vorschlag wurde bereits {row['status']}.")
+    return row
+
+
+@app.post("/api/chat/aenderungen/{vorschlag_id}/bestaetigen", tags=["Chat"],
+          summary="Aenderungsvorschlag der KI ausfuehren (nur nach Klick des Nutzers)")
+def aenderung_bestaetigen(vorschlag_id: str, request: Request, client: str = Depends(client_id),
+                          conn: Conn = Depends(db.get_conn)) -> Any:
+    """Prueft, ob sich die Werte seit dem Vorschlag geaendert haben (dann 409, nichts wird ueberschrieben)."""
+    row = _eigener_vorschlag(conn, vorschlag_id, client)
+    vorschlag = json.loads(row["vorschlag_json"])
+    try:
+        ergebnis = aenderungen.ausfuehren(conn, vorschlag)
+    except aenderungen.AenderungsKonflikt as exc:
+        logger.warning("Aenderungsvorschlag %s: Konflikt %s", vorschlag_id, exc.konflikte)
+        return _fehler_json(request, 409, exc.konflikte, "AENDERUNG_KONFLIKT",
+                            meldung="Die Akte wurde inzwischen geändert – nichts gespeichert. Bitte die KI um einen neuen Vorschlag.")
+    conn.execute("UPDATE chat_aenderung SET status = 'bestaetigt', ergebnis_json = ?, entschieden_am = datetime('now') "
+                 "WHERE id = ?", (json.dumps(ergebnis, ensure_ascii=False), vorschlag_id))
+    logger.info("Aenderungsvorschlag %s fuer VM-%s bestaetigt (%d Aenderungen)",
+                vorschlag_id, vorschlag["vermittler_nr"], ergebnis["anzahl"])
+    return {"id": vorschlag_id, "status": "bestaetigt", "ergebnis": ergebnis,
+            "partner": _partner_summary(db.get_vermittler_full(conn, int(vorschlag["vermittler_nr"])))}
+
+
+@app.post("/api/chat/aenderungen/{vorschlag_id}/verwerfen", tags=["Chat"], summary="Aenderungsvorschlag verwerfen")
+def aenderung_verwerfen(vorschlag_id: str, client: str = Depends(client_id),
+                        conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    _eigener_vorschlag(conn, vorschlag_id, client)
+    conn.execute("UPDATE chat_aenderung SET status = 'verworfen', entschieden_am = datetime('now') WHERE id = ?",
+                 (vorschlag_id,))
+    return {"id": vorschlag_id, "status": "verworfen"}
 
 
 # =========================================================================== Sprache (Amazon Transcribe)

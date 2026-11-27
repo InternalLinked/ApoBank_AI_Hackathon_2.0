@@ -1,5 +1,8 @@
 import type {
   Analysis,
+  ChangeProposal,
+  ProposalStatus,
+  ProposedChange,
   ChartType,
   ChartUnit,
   ChatMessage,
@@ -249,6 +252,32 @@ function toAnalysis(value: unknown, createdAt: string): Analysis | null {
   };
 }
 
+const CHANGE_KINDS: ProposedChange["kind"][] = ["stammdaten", "kontakt", "geschaeftszahlen", "profil_fakt_aendern", "profil_fakt_loeschen", "profil_fakt_neu", "notiz_neu"];
+
+function cellValue(value: unknown): string | number | null {
+  return typeof value === "number" || typeof value === "string" ? value : null;
+}
+
+function toProposal(value: unknown, createdAt: string): ChangeProposal | null {
+  const item = record(value);
+  if (typeof item.id !== "string" || typeof item.vermittler_nr !== "number") return null;
+  const status: ProposalStatus = item.status === "bestaetigt" || item.status === "verworfen" ? item.status : "offen";
+  const changes = Array.isArray(item.aenderungen) ? item.aenderungen.map((raw) => {
+    const change = record(raw);
+    const kind = CHANGE_KINDS.includes(change.art as ProposedChange["kind"]) ? change.art as ProposedChange["kind"] : "stammdaten";
+    return { area: String(change.bereich ?? ""), label: String(change.label ?? ""), oldValue: cellValue(change.alt), newValue: cellValue(change.neu), kind };
+  }) : [];
+  return {
+    id: item.id,
+    status,
+    vermittlerNr: item.vermittler_nr,
+    vermittler: String(item.vermittler ?? `Vermittler ${item.vermittler_nr}`),
+    reason: String(item.begruendung ?? ""),
+    changes,
+    createdAt,
+  };
+}
+
 function toMessage(value: unknown): ChatMessage {
   const item = record(value);
   const metadata = record(item.metadata);
@@ -257,9 +286,20 @@ function toMessage(value: unknown): ChatMessage {
   const analyses = Array.isArray(metadata.analysen)
     ? metadata.analysen.map((analysis) => toAnalysis(analysis, createdAt)).filter((analysis): analysis is Analysis => analysis !== null)
     : [];
+  const proposals = Array.isArray(metadata.aenderungsvorschlaege)
+    ? metadata.aenderungsvorschlaege.map((proposal) => toProposal(proposal, createdAt)).filter((proposal): proposal is ChangeProposal => proposal !== null)
+    : [];
+  const model = record(metadata.modell);
   return {
+    model: typeof model.modell === "string" ? {
+      name: model.modell,
+      tier: String(model.stufe ?? ""),
+      rounds: typeof model.runden === "number" ? model.runden : 0,
+      seconds: typeof model.dauer_ms === "number" ? model.dauer_ms / 1000 : 0,
+    } : undefined,
     candidates: candidates.length > 0 ? candidates : undefined,
     analyses: analyses.length > 0 ? analyses : undefined,
+    proposals: proposals.length > 0 ? proposals : undefined,
     id: String(item.id ?? randomId()),
     role: item.role === "user" ? "user" : "assistant",
     content: String(item.content ?? ""),
@@ -421,6 +461,15 @@ export function createWorkspaceApi(): WorkspaceApi {
         method: "POST",
         body: JSON.stringify({ titel: "Neue Unterhaltung" }),
       }));
+    },
+
+    async confirmProposal(proposalId: string): Promise<{ partner: PartnerSummary | null }> {
+      const data = record(await request<unknown>(`/chat/aenderungen/${encodeURIComponent(proposalId)}/bestaetigen`, { method: "POST" }));
+      return { partner: toPartner(data.partner) };
+    },
+
+    async rejectProposal(proposalId: string): Promise<void> {
+      await request<unknown>(`/chat/aenderungen/${encodeURIComponent(proposalId)}/verwerfen`, { method: "POST" });
     },
 
     async transcribe(pcm: Blob, sampleRate: number, language = "de-DE"): Promise<Transcription> {

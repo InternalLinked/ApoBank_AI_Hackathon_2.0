@@ -93,7 +93,7 @@ class _FakeOpenAI:
     def __init__(self, **_):
         self.responses = self
 
-    def create(self, model, instructions, tools, input):
+    def create(self, model, instructions, tools, input, **_):
         from backend import openai_copilot
         schon_tool = any(isinstance(i, dict) and i.get("type") == "function_call_output" for i in input)
         if instructions == openai_copilot.ANALYSE_INSTRUCTIONS:
@@ -182,6 +182,83 @@ def test_transkription_fehlende_rechte_werden_verstaendlich(client, monkeypatch)
     assert transcribe._uebersetze(AccessDeniedException("User is not authorized")).code == "TRANSCRIBE_RECHTE"
     assert transcribe._uebersetze(RuntimeError("AWS_ERROR_AUTH_SIGNING_NO_CREDENTIALS")).code == "TRANSCRIBE_RECHTE"
     assert transcribe._uebersetze(ValueError("kaputt")).code == "TRANSCRIBE_FEHLER"
+
+
+class _FakeAenderungsOpenAI(_FakeOpenAI):
+    """Chat-Agent schlaegt Aenderungen vor; der parallele Analyse-Agent haelt keine Abfrage fuer noetig."""
+    AENDERUNGEN = [
+        {"art": "kontakt", "feld": "email", "jahr": 0, "fakt_id": "", "wert": "h.baumann@neu.de"},
+        {"art": "stammdaten", "feld": "interessen", "jahr": 0, "fakt_id": "", "wert": "Sport, Segeln"},
+        {"art": "geschaeftszahlen", "feld": "volumen_eur", "jahr": 2025, "fakt_id": "", "wert": "11.000.000"},
+        {"art": "stammdaten", "feld": "obsidian_pfad", "jahr": 0, "fakt_id": "", "wert": "../../etc"},  # nicht erlaubt
+    ]
+
+    def create(self, model, instructions, tools, input, **_):
+        from backend import openai_copilot
+        if instructions == openai_copilot.ANALYSE_INSTRUCTIONS:
+            return _FakeResponse(text="KEINE")
+        if not any(isinstance(i, dict) and i.get("type") == "function_call_output" for i in input):
+            return _FakeResponse([_FakeCall("aenderung_vorschlagen", {
+                "vermittler_nr": 4251, "begruendung": "Laut Nutzer", "aenderungen": self.AENDERUNGEN}, "c1")])
+        return _FakeResponse(text="Ich habe 3 Änderungen vorgeschlagen – bitte im Tab Änderungen bestätigen.")
+
+
+def _vorschlag_anfordern(client, monkeypatch):
+    import openai
+
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    monkeypatch.setattr(openai, "OpenAI", _FakeAenderungsOpenAI)
+    chat_id = client.post("/api/chat/conversations", json={"titel": "t"}, headers=BROWSER_A).json()["id"]
+    r = client.post(f"/api/chat/conversations/{chat_id}/messages", json={"inhalt": "Aendere bitte ..."}, headers=BROWSER_A)
+    assert r.status_code == 200, r.text
+    [vorschlag] = r.json()["aenderungsvorschlaege"]
+    return chat_id, vorschlag
+
+
+def test_ki_aenderungen_erst_nach_bestaetigung(client, monkeypatch):
+    chat_id, vorschlag = _vorschlag_anfordern(client, monkeypatch)
+    assert vorschlag["status"] == "offen"
+    felder = {(a["bereich"], a["label"]): (a["alt"], a["neu"]) for a in vorschlag["aenderungen"]}
+    assert felder == {
+        ("Kontakt", "E-Mail"): ("abc.aaa@abc.de", "h.baumann@neu.de"),
+        ("Stammdaten", "Interessen/Hobbys"): ("Sport", "Sport, Segeln"),
+        ("Geschäftszahlen", "Kreditvolumen (EUR) 2025"): (10773001, 11000000),
+    }  # obsidian_pfad wurde abgelehnt (Whitelist)
+
+    # Vor der Bestaetigung ist nichts geaendert
+    v = client.get("/api/vermittler/4251").json()
+    assert v["kontakt"]["email"] == "abc.aaa@abc.de"
+
+    # Fremder Browser darf nicht bestaetigen
+    assert client.post(f"/api/chat/aenderungen/{vorschlag['id']}/bestaetigen", headers=BROWSER_B).status_code == 404
+
+    r = client.post(f"/api/chat/aenderungen/{vorschlag['id']}/bestaetigen", headers=BROWSER_A)
+    assert r.status_code == 200, r.text
+    v = client.get("/api/vermittler/4251").json()
+    assert v["kontakt"]["email"] == "h.baumann@neu.de" and v["interessen"] == ["Sport", "Segeln"]
+    assert next(g for g in v["geschaeftszahlen"] if g["jahr"] == 2025)["volumen_eur"] == 11_000_000
+    # Protokollnotiz im Obsidian-Gehirn
+    assert any("Änderungen aus dem Chat bestätigt" in e.get("titel", "")
+               for e in client.get("/api/vermittler/4251/obsidian").json()["eintraege"])
+
+    # Kein zweites Bestaetigen; Status im Verlauf ist "bestaetigt"
+    assert client.post(f"/api/chat/aenderungen/{vorschlag['id']}/bestaetigen", headers=BROWSER_A).status_code == 409
+    verlauf = client.get("/api/chat/workspace", headers=BROWSER_A).json()["messages_by_conversation"][chat_id]
+    assert verlauf[-1]["metadata"]["aenderungsvorschlaege"][0]["status"] == "bestaetigt"
+
+
+def test_ki_aenderung_konflikt_und_verwerfen(client, monkeypatch):
+    _, vorschlag = _vorschlag_anfordern(client, monkeypatch)
+    # Jemand aendert die E-Mail, nachdem der Vorschlag erstellt wurde
+    client.patch("/api/vermittler/4251", json={"kontakt": {"email": "zwischendurch@x.de"}})
+    r = client.post(f"/api/chat/aenderungen/{vorschlag['id']}/bestaetigen", headers=BROWSER_A)
+    assert r.status_code == 409 and r.json()["fehler_code"] == "AENDERUNG_KONFLIKT"
+    v = client.get("/api/vermittler/4251").json()
+    assert v["kontakt"]["email"] == "zwischendurch@x.de" and v["interessen"] == ["Sport"]  # nichts ueberschrieben
+
+    _, vorschlag2 = _vorschlag_anfordern(client, monkeypatch)
+    assert client.post(f"/api/chat/aenderungen/{vorschlag2['id']}/verwerfen", headers=BROWSER_A).json()["status"] == "verworfen"
+    assert client.get("/api/vermittler/4251").json()["kontakt"]["email"] == "zwischendurch@x.de"
 
 
 def test_chats_sind_pro_browser_getrennt(client):
@@ -477,6 +554,39 @@ def test_copilot_speichert_direkt_im_obsidian(client):
     assert "Praxisfinanzierung 2027" in notiz["inhalt"] and "- [ ] Konditionen schicken" in notiz["inhalt"]
     rows = client.post("/api/sql/query", json={"sql": "SELECT autor FROM obsidian_eintrag WHERE vermittler_nr = 4251"}).json()
     assert ["copilot"] in rows["zeilen"]
+
+
+class _FakeNeueInfoOpenAI(_FakeOpenAI):
+    """Chat-Agent will eine neue Profil-Info und eine Notiz speichern – es darf nur ein Vorschlag entstehen."""
+
+    def create(self, model, instructions, tools, input, **_):
+        if not any(isinstance(i, dict) and i.get("type") == "function_call_output" for i in input):
+            return _FakeResponse([_FakeCall("im_obsidian_speichern", {"vermittler_nr": 4251, "angaben": [
+                {"gruppe": "persoenlich", "label": "Haustiere", "wert": "Hat einen Hund namens Tim", "quelle": "Chat"},
+                {"gruppe": "next-step", "label": "Aufgabe", "wert": "Konditionen schicken", "quelle": "Chat"},
+            ]}, "c1")])
+        return _FakeResponse(text="Zur Bestätigung vorbereitet.")
+
+
+def test_neue_infos_werden_erst_nach_bestaetigung_gespeichert(client, monkeypatch):
+    import openai
+
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    monkeypatch.setattr(openai, "OpenAI", _FakeNeueInfoOpenAI)
+    chat_id = client.post("/api/chat/conversations", json={"titel": "t"}, headers=BROWSER_A).json()["id"]
+    r = client.post(f"/api/chat/conversations/{chat_id}/messages",
+                    json={"inhalt": "Herr Baumann hat einen Hund namens Tim, ich schicke ihm die Konditionen"},
+                    headers=BROWSER_A)
+    [vorschlag] = r.json()["aenderungsvorschlaege"]
+    assert [(a["art"], a["alt"], a["neu"]) for a in vorschlag["aenderungen"]] == [
+        ("profil_fakt_neu", None, "Hat einen Hund namens Tim"), ("notiz_neu", None, "Konditionen schicken")]
+    assert [f["text"] for f in client.get("/api/vermittler/4251/profil").json()["fakten"]] == ["Sport"]
+
+    assert client.post(f"/api/chat/aenderungen/{vorschlag['id']}/bestaetigen", headers=BROWSER_A).status_code == 200
+    assert sorted(f["text"] for f in client.get("/api/vermittler/4251/profil").json()["fakten"]) == [
+        "Hat einen Hund namens Tim", "Sport"]
+    notizen = client.get("/api/vermittler/4251/obsidian/inhalt").json()["eintraege"]
+    assert any("- [ ] Konditionen schicken" in e["inhalt"] for e in notizen)
 
 
 def test_copilot_speichert_nichts_bei_unbekanntem_vermittler(client):
