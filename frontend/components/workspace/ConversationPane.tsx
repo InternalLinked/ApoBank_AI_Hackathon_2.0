@@ -5,14 +5,15 @@ import { Icon } from "./Icons";
 type ConversationPaneProps = {
   conversation: Conversation | undefined;
   messages: ChatMessage[];
-  partner: PartnerSummary;
+  partner: PartnerSummary | null;
+  aiConfigured: boolean;
   isSending: boolean;
   onSend: (content: string) => void;
   onOpenChats: () => void;
   onOpenDetails: () => void;
 };
 
-export function ConversationPane({ conversation, messages, partner, isSending, onSend, onOpenChats, onOpenDetails }: ConversationPaneProps) {
+export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, onOpenDetails }: ConversationPaneProps) {
   const [value, setValue] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -41,15 +42,15 @@ export function ConversationPane({ conversation, messages, partner, isSending, o
         <button className="icon-button mobile-trigger" aria-label="Chatverläufe öffnen" onClick={onOpenChats}><Icon name="menu" /></button>
         <div className="breadcrumb"><span>Partnervertrieb</span><Icon name="chevron" size={14} /><strong>Unterhaltungen</strong></div>
         <div className="topbar-actions">
-          <span className="prototype-pill"><span /> Prototyp</span>
+          <span className={`prototype-pill ${aiConfigured ? "is-ready" : ""}`}><span /> {aiConfigured ? "KI verbunden" : "KI-Key fehlt"}</span>
           <button className="icon-button mobile-trigger" aria-label="Partnerakte öffnen" onClick={onOpenDetails}><Icon name="panel" /></button>
-          <button className="topbar-avatar" aria-label={`Partnerakte ${partner.name}`}>LW</button>
+          <button className="topbar-avatar" aria-label={`Partnerakte ${partner?.name ?? "öffnen"}`}>{partner?.name.split(" ").map((part) => part[0]).join("").slice(0, 2) ?? "PC"}</button>
         </div>
       </header>
 
       <section className="conversation-heading">
         <div className="heading-mark"><Icon name="sparkle" size={19} /></div>
-        <div className="heading-copy"><span>CHAT · PARTNERAKTE {partner.partnerId}</span><h1>{conversation?.title ?? "Neue Unterhaltung"}</h1></div>
+        <div className="heading-copy"><span>CHAT · {partner ? `PARTNERAKTE ${partner.partnerId}` : "PARTNERVERTRIEB"}</span><h1>{conversation?.title ?? "Neue Unterhaltung"}</h1></div>
         <button className="heading-action" type="button"><Icon name="more" size={18} /></button>
       </section>
 
@@ -83,7 +84,7 @@ export function ConversationPane({ conversation, messages, partner, isSending, o
           <textarea rows={1} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={handleKeyDown} placeholder="Frage zur Partnerakte oder schreibe eine Notiz …" aria-label="Nachricht an den Partner-Copilot" />
           <div className="composer-footer"><span><Icon name="sparkle" size={14} /> Antworten mit Quellenbezug</span><div className="composer-actions"><button type="button" className="composer-attach" aria-label="Datei anhängen" title="Datei anhängen"><Icon name="file" size={17} /></button><button type="submit" className="send-button" disabled={!value.trim() || isSending} aria-label="Nachricht senden"><Icon name="send" size={16} /></button></div></div>
         </form>
-        <p className="composer-note">Demo-Oberfläche mit Beispieldaten · wichtige Angaben bitte anhand der Quelle prüfen.</p>
+        <p className="composer-note">Angaben aus dem Chat erst prüfen und anschließend bewusst in die Partnerakte übernehmen.</p>
       </div>
     </main>
   );

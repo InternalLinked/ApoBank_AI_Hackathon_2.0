@@ -5,19 +5,24 @@ Doku:   http://127.0.0.1:8000/docs   (OpenAPI: /openapi.json -> direkt als Tool-
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from contextlib import asynccontextmanager
 from datetime import date
+from pathlib import Path
 from typing import Any, Literal
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 
-from . import db, obsidian
+from . import copilot, db, obsidian
 from .config import settings
-from .schemas import (EintragIn, GeschaeftszahlIn, SqlQueryIn, VermittlerCreate, VermittlerUpdate,
-                      ZusammenfassungIn)
+from .schemas import (ChatKonversationCreate, ChatNachrichtIn, EintragIn, GeschaeftszahlIn, SqlQueryIn,
+                      VermittlerCreate, VermittlerUpdate, ZusammenfassungIn)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -35,6 +40,13 @@ app = FastAPI(
         "Vertriebsanalysen, read-only SQL sowie ein Obsidian-'Gehirn' pro Vermittler zum Lesen und Ergaenzen "
         "von Wissen (Gespraechsprotokolle, Notizen, Massnahmen, KI-Zusammenfassungen)."
     ),
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(settings.cors_origins),
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 Conn = sqlite3.Connection
@@ -58,6 +70,45 @@ def _latest_year(conn: Conn) -> int:
 
 def _iso(value: Any) -> Any:
     return value.isoformat() if isinstance(value, date) else value
+
+
+def _partner_summary(vermittler: dict[str, Any] | None) -> dict[str, Any] | None:
+    if vermittler is None:
+        return None
+    betreuung = vermittler.get("betreuung") or {}
+    return {
+        "vermittler_nr": vermittler["vermittler_nr"],
+        "name": vermittler["anzeigename"],
+        "company": vermittler.get("firma_filiale") or "Kein Unternehmen hinterlegt",
+        "partner_id": f"VM-{vermittler['vermittler_nr']}",
+        "relationship_manager": betreuung.get("name") or "Nicht zugeordnet",
+        "status": vermittler.get("status", "aktiv"),
+    }
+
+
+def _decode_metadata(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        decoded = json.loads(value)
+        return decoded if isinstance(decoded, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _chat_message(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "role": row["rolle"],
+        "content": row["inhalt"],
+        "created_at": row["erstellt_am"],
+        "metadata": _decode_metadata(row["metadaten_json"]),
+    }
+
+
+@app.get("/api/health", tags=["Meta"], summary="Laufzeitstatus fuer die Weboberflaeche")
+def health() -> dict[str, Any]:
+    return {"status": "ok", "openai_configured": bool(settings.openai_api_key)}
 
 
 # =========================================================================== Meta
@@ -435,6 +486,84 @@ def ueberblick(marktgebiet: str | None = None, filial_nr: int | None = None, mit
     }
 
 
+# =========================================================================== Chat / OpenAI
+
+@app.get("/api/chat/workspace", tags=["Chat"], summary="Gespeicherte Chatverlaeufe fuer die Weboberflaeche")
+def get_chat_workspace(conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    conversations = db.rows_to_dicts(conn.execute(
+        "SELECT c.id, c.titel, c.vermittler_nr, c.aktualisiert_am, "
+        "COALESCE((SELECT inhalt FROM chat_nachricht m WHERE m.konversation_id = c.id ORDER BY m.id DESC LIMIT 1), "
+        "'Noch keine Nachrichten') AS vorschau "
+        "FROM chat_konversation c ORDER BY c.aktualisiert_am DESC, c.erstellt_am DESC"
+    ).fetchall())
+    messages: dict[str, list[dict[str, Any]]] = {}
+    for conversation in conversations:
+        rows = conn.execute(
+            "SELECT id, rolle, inhalt, metadaten_json, erstellt_am FROM chat_nachricht "
+            "WHERE konversation_id = ? ORDER BY id", (conversation["id"],)
+        ).fetchall()
+        messages[conversation["id"]] = [_chat_message(row) for row in rows]
+    return {
+        "conversations": conversations,
+        "messages_by_conversation": messages,
+        "openai_configured": bool(settings.openai_api_key),
+    }
+
+
+@app.post("/api/chat/conversations", tags=["Chat"], status_code=201, summary="Neuen Chat anlegen")
+def create_chat_conversation(body: ChatKonversationCreate, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    conversation_id = str(uuid4())
+    conn.execute("INSERT INTO chat_konversation (id, titel) VALUES (?, ?)", (conversation_id, body.titel.strip()))
+    row = conn.execute(
+        "SELECT id, titel, vermittler_nr, aktualisiert_am, 'Noch keine Nachrichten' AS vorschau "
+        "FROM chat_konversation WHERE id = ?", (conversation_id,)
+    ).fetchone()
+    return dict(row)
+
+
+@app.post("/api/chat/conversations/{conversation_id}/messages", tags=["Chat"],
+          summary="Nachricht speichern und ueber OpenAI mit Datenwerkzeugen beantworten")
+def send_chat_message(conversation_id: str, body: ChatNachrichtIn, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    conversation = conn.execute("SELECT id, titel FROM chat_konversation WHERE id = ?", (conversation_id,)).fetchone()
+    if conversation is None:
+        raise HTTPException(404, "Chat nicht gefunden")
+
+    content = body.inhalt.strip()
+    conn.execute(
+        "INSERT INTO chat_nachricht (konversation_id, rolle, inhalt) VALUES (?, 'user', ?)",
+        (conversation_id, content),
+    )
+    history_rows = conn.execute(
+        "SELECT rolle, inhalt FROM chat_nachricht WHERE konversation_id = ? ORDER BY id DESC LIMIT 16",
+        (conversation_id,),
+    ).fetchall()
+    history = [{"role": row["rolle"], "content": row["inhalt"]} for row in reversed(history_rows)]
+    reply = copilot.antwort_auf_nachricht(conn, history)
+    partner = _partner_summary(db.get_vermittler_full(conn, reply.vermittler_nr)) if reply.vermittler_nr else None
+    metadata = {
+        "findings": reply.findings,
+        "vermittler_nr": reply.vermittler_nr,
+        "partner": partner,
+        "sources": reply.sources,
+        "openai_configured": reply.configured,
+    }
+    cursor = conn.execute(
+        "INSERT INTO chat_nachricht (konversation_id, rolle, inhalt, metadaten_json) VALUES (?, 'assistant', ?, ?)",
+        (conversation_id, reply.content, json.dumps(metadata, ensure_ascii=False)),
+    )
+    title = content[:60] + ("…" if len(content) > 60 else "") if conversation["titel"] == "Neue Unterhaltung" else conversation["titel"]
+    conn.execute(
+        "UPDATE chat_konversation SET titel = ?, vermittler_nr = COALESCE(?, vermittler_nr), aktualisiert_am = datetime('now') "
+        "WHERE id = ?",
+        (title, reply.vermittler_nr, conversation_id),
+    )
+    message = conn.execute(
+        "SELECT id, rolle, inhalt, metadaten_json, erstellt_am FROM chat_nachricht WHERE id = ?", (cursor.lastrowid,)
+    ).fetchone()
+    return {"message": _chat_message(message), "partner": partner, "findings": reply.findings,
+            "openai_configured": reply.configured}
+
+
 # =========================================================================== Obsidian-Gehirn
 
 @app.get("/api/vermittler/{vermittler_nr}/obsidian", tags=["Obsidian"], summary="Obsidian-Referenz + Eintragsliste")
@@ -473,6 +602,54 @@ def add_obsidian_eintrag(vermittler_nr: int, body: EintragIn, conn: Conn = Depen
     return {"id": cur.lastrowid, "vermittler_nr": vermittler_nr, **res}
 
 
+@app.post("/api/vermittler/{vermittler_nr}/dokumente", tags=["Obsidian"], status_code=201,
+          summary="Gespaechsnotiz mit Anhang in der Partnerakte ablegen")
+async def add_document(
+    vermittler_nr: int,
+    file: UploadFile = File(...),
+    titel: str | None = Form(None),
+    inhalt: str | None = Form(None),
+    datum: date | None = Form(None),
+    conn: Conn = Depends(db.get_conn),
+) -> dict[str, Any]:
+    """Legt einen Anhang lokal ab und verlinkt ihn aus einem Obsidian-Dokumenteintrag."""
+    vermittler = _require(conn, vermittler_nr)
+    original_name = Path(file.filename or "anhang").name
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in {".pdf", ".doc", ".docx", ".txt"}:
+        raise HTTPException(415, "Erlaubt sind PDF, DOC, DOCX und TXT")
+    content = await file.read(10 * 1024 * 1024 + 1)
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(413, "Die Datei darf maximal 10 MB gross sein")
+
+    folder = settings.upload_path / f"VM-{vermittler_nr}"
+    folder.mkdir(parents=True, exist_ok=True)
+    saved_name = f"{uuid4().hex}{suffix}"
+    destination = folder / saved_name
+    destination.write_bytes(content)
+    relative_path = destination.relative_to(settings.upload_path.parent).as_posix()
+    note_text = (inhalt or "").strip() or "Dokument zur Partnerakte hinzugefuegt."
+    note_text += f"\n\n## Anhang\n- `{relative_path}` ({original_name})"
+    entry = {
+        "typ": "dokument",
+        "titel": (titel or original_name).strip(),
+        "inhalt": note_text,
+        "datum": datum,
+        "teilnehmer": [],
+        "massnahmen": [],
+        "tags": ["upload"],
+        "autor": "ui",
+        "quelle": "upload",
+    }
+    result = obsidian.add_entry(vermittler, entry)
+    cursor = conn.execute(
+        "INSERT INTO obsidian_eintrag (vermittler_nr, typ, titel, datum, datei, autor, quelle) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (vermittler_nr, result["typ"], result["titel"], result["datum"], result["datei"], "ui", "upload"),
+    )
+    return {"id": cursor.lastrowid, "vermittler_nr": vermittler_nr, "upload": relative_path, **result}
+
+
 @app.put("/api/vermittler/{vermittler_nr}/obsidian/zusammenfassung", tags=["Obsidian"],
          summary="KI-Zusammenfassung in die Hub-Notiz schreiben")
 def put_zusammenfassung(vermittler_nr: int, body: ZusammenfassungIn,
@@ -501,3 +678,11 @@ def sync_obsidian_all(conn: Conn = Depends(db.get_conn)) -> dict[str, int]:
 @app.get("/api/obsidian/suche", tags=["Obsidian"], summary="Volltextsuche ueber alle Vermittler-Notizen")
 def search_obsidian(q: str = Query(min_length=2), limit: int = Query(20, ge=1, le=200)) -> list[dict[str, Any]]:
     return obsidian.search(q, limit)
+
+
+# Die produktive Einzelcontainer-Variante liefert den statischen Next.js-Export
+# ueber FastAPI aus. Lokal bleibt `npm run dev` moeglich; die API wird dabei per
+# Next.js-Rewrite auf Port 8000 weitergeleitet.
+_frontend_out = Path(__file__).resolve().parent.parent / "frontend" / "out"
+if _frontend_out.is_dir():
+    app.mount("/", StaticFiles(directory=str(_frontend_out), html=True), name="frontend")

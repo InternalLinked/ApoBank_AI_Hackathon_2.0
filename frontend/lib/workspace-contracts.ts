@@ -3,6 +3,7 @@ export type Conversation = {
   title: string;
   preview: string;
   updatedAt: string;
+  vermittlerNr?: number;
 };
 
 export type MessageMetric = {
@@ -20,6 +21,9 @@ export type ChatMessage = {
   metrics?: MessageMetric[];
   bullets?: string[];
   source?: string;
+  findings?: ExtractedFinding[];
+  partner?: PartnerSummary;
+  aiConfigured?: boolean;
 };
 
 export type FindingStatus = "new" | "confirmed";
@@ -35,18 +39,20 @@ export type ExtractedFinding = {
 };
 
 export type PartnerSummary = {
+  vermittlerNr: number;
   name: string;
   company: string;
   partnerId: string;
   relationshipManager: string;
-  status: "Aktiv" | "In Prüfung";
+  status: string;
 };
 
 export type WorkspaceSnapshot = {
   conversations: Conversation[];
   messagesByConversation: Record<string, ChatMessage[]>;
-  partner: PartnerSummary;
+  partner: PartnerSummary | null;
   findings: ExtractedFinding[];
+  aiConfigured: boolean;
 };
 
 export type ManualEntryInput =
@@ -63,16 +69,27 @@ export type ManualEntryInput =
       date: string;
       content: string;
       fileName?: string;
+      file?: File | null;
+      vermittlerNr?: number;
     };
 
 export type SavedEntry = {
   id: string;
   label: string;
+  partner?: PartnerSummary;
+};
+
+export type ChatReply = {
+  message: ChatMessage;
+  partner: PartnerSummary | null;
+  findings: ExtractedFinding[];
+  aiConfigured: boolean;
 };
 
 export interface WorkspaceApi {
   loadWorkspace(): Promise<WorkspaceSnapshot>;
-  sendMessage(conversationId: string, content: string): Promise<ChatMessage>;
+  createConversation(): Promise<Conversation>;
+  sendMessage(conversationId: string, content: string): Promise<ChatReply>;
   createEntry(input: ManualEntryInput): Promise<SavedEntry>;
-  confirmFindings(conversationId: string, findingIds: string[]): Promise<void>;
+  confirmFindings(conversationId: string, partner: PartnerSummary, findings: ExtractedFinding[]): Promise<void>;
 }

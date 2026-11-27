@@ -3,7 +3,7 @@ import type { ExtractedFinding, ManualEntryInput, PartnerSummary } from "@/lib/w
 import { Icon } from "./Icons";
 
 type InspectorPanelProps = {
-  partner: PartnerSummary;
+  partner: PartnerSummary | null;
   findings: ExtractedFinding[];
   mobileOpen: boolean;
   onCloseMobile: () => void;
@@ -12,9 +12,11 @@ type InspectorPanelProps = {
 };
 
 export function InspectorPanel({ partner, findings, mobileOpen, onCloseMobile, onSaveEntry, onConfirmFindings }: InspectorPanelProps) {
+  const today = new Date().toISOString().slice(0, 10);
   const [activeTab, setActiveTab] = useState<"findings" | "manual">("findings");
   const [entryKind, setEntryKind] = useState<"partner" | "note">("partner");
   const [fileName, setFileName] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState("");
   const pending = findings.filter((finding) => finding.status === "new");
@@ -31,8 +33,10 @@ export function InspectorPanel({ partner, findings, mobileOpen, onCloseMobile, o
         relationshipManager: String(form.get("relationshipManager") ?? ""),
         email: String(form.get("email") ?? ""),
       });
-      setSuccess(`${label} wurde als Demo-Eintrag angelegt.`);
+      setSuccess(`${label} wurde angelegt.`);
       event.currentTarget.reset();
+    } catch (error) {
+      setSuccess(error instanceof Error ? error.message : "Der Vermittler konnte nicht angelegt werden.");
     } finally {
       setSaving(false);
     }
@@ -49,10 +53,15 @@ export function InspectorPanel({ partner, findings, mobileOpen, onCloseMobile, o
         date: String(form.get("date") ?? ""),
         content: String(form.get("content") ?? ""),
         fileName,
+        file,
+        vermittlerNr: partner?.vermittlerNr,
       });
-      setSuccess(`${label} wurde als Demo-Eintrag angelegt.`);
+      setSuccess(`${label} wurde gespeichert.`);
       event.currentTarget.reset();
       setFileName("");
+      setFile(null);
+    } catch (error) {
+      setSuccess(error instanceof Error ? error.message : "Die Notiz konnte nicht gespeichert werden.");
     } finally {
       setSaving(false);
     }
@@ -66,8 +75,8 @@ export function InspectorPanel({ partner, findings, mobileOpen, onCloseMobile, o
 
   return (
     <aside className="inspector-panel" data-mobile-open={mobileOpen} aria-label="Partnerakte und manuelle Eingabe">
-      <div className="inspector-heading"><div><span className="eyebrow">PARTNERAKTE</span><h2>{partner.name}</h2><p>{partner.company} <span>·</span> {partner.partnerId}</p></div><button className="icon-button inspector-close" aria-label="Details schließen" onClick={onCloseMobile}><Icon name="close" /></button></div>
-      <div className="partner-status-row"><span className="status-dot" />{partner.status}<span className="status-separator">·</span><span>Betreut von {partner.relationshipManager}</span></div>
+      <div className="inspector-heading"><div><span className="eyebrow">PARTNERAKTE</span><h2>{partner?.name ?? "Noch keine Akte"}</h2><p>{partner ? <>{partner.company} <span>·</span> {partner.partnerId}</> : "Suche einen Vermittler im Chat oder lege ihn manuell an."}</p></div><button className="icon-button inspector-close" aria-label="Details schließen" onClick={onCloseMobile}><Icon name="close" /></button></div>
+      {partner && <div className="partner-status-row"><span className="status-dot" />{partner.status}<span className="status-separator">·</span><span>Betreut von {partner.relationshipManager}</span></div>}
 
       <div className="inspector-tabs" role="tablist" aria-label="Partnerakten-Bereich">
         <button type="button" role="tab" aria-selected={activeTab === "findings"} className={activeTab === "findings" ? "is-active" : ""} onClick={() => setActiveTab("findings")}><Icon name="sparkle" size={15} />Erkannt{pending.length > 0 && <span className="tab-count">{pending.length}</span>}</button>
@@ -76,15 +85,16 @@ export function InspectorPanel({ partner, findings, mobileOpen, onCloseMobile, o
 
       {activeTab === "findings" ? (
         <div className="inspector-scroll">
-          <div className="section-title-row"><div><h3>Aus dem Chat erkannt</h3><p>Prüfe die Angaben, bevor sie gespeichert werden.</p></div><span className="source-count"><Icon name="file" size={14} />1 Quelle</span></div>
-          <div className="source-card"><div className="source-icon"><Icon name="file" size={17} /></div><div><strong>Gesprächsnotiz</strong><span>18. November 2026 · PDF</span></div><button className="icon-button tiny" aria-label="Quelle öffnen"><Icon name="arrow" size={14} /></button></div>
+          <div className="section-title-row"><div><h3>Aus dem Chat erkannt</h3><p>Prüfe die Angaben, bevor sie gespeichert werden.</p></div><span className="source-count"><Icon name="file" size={14} />{findings.length} Angaben</span></div>
+          {findings.length === 0 ? <div className="review-note"><Icon name="sparkle" size={15} /><p>Wenn der Copilot konkrete Angaben zu einer Partnerakte erkennt, erscheinen sie hier zur Bestätigung.</p></div> : <>
 
           <div className="finding-group"><div className="finding-group-heading"><span className="group-icon"><Icon name="person" size={15} /></span><h4>Partner & Gespräch</h4></div>{findings.filter((finding) => finding.group === "partner").map((finding) => <FindingRow key={finding.id} finding={finding} />)}</div>
           <div className="finding-group"><div className="finding-group-heading"><span className="group-icon blue"><Icon name="briefcase" size={15} /></span><h4>Geschäftsdaten</h4></div>{findings.filter((finding) => finding.group === "business").map((finding) => <FindingRow key={finding.id} finding={finding} />)}</div>
           <div className="finding-group"><div className="finding-group-heading"><span className="group-icon amber"><Icon name="calendar" size={15} /></span><h4>Nächster Schritt</h4></div>{findings.filter((finding) => finding.group === "next-step").map((finding) => <FindingRow key={finding.id} finding={finding} />)}</div>
 
-          <div className="review-note"><Icon name="sparkle" size={15} /><p>Die Angaben stammen aus Demo-Quellen. Vor dem Übernehmen bitte in der Quelle gegenprüfen.</p></div>
-          <button type="button" className={`confirm-button ${pending.length === 0 ? "is-confirmed" : ""}`} disabled={pending.length === 0} onClick={() => onConfirmFindings(pending.map((finding) => finding.id))}><Icon name="check" size={17} />{pending.length === 0 ? "Angaben übernommen" : `Alle ${pending.length} Angaben übernehmen`}</button>
+          <div className="review-note"><Icon name="sparkle" size={15} /><p>Die Angaben stammen aus dem Chat. Vor dem Übernehmen bitte gegenprüfen.</p></div>
+          <button type="button" className={`confirm-button ${pending.length === 0 ? "is-confirmed" : ""}`} disabled={pending.length === 0 || !partner} onClick={() => onConfirmFindings(pending.map((finding) => finding.id))}><Icon name="check" size={17} />{pending.length === 0 ? "Angaben übernommen" : `Alle ${pending.length} Angaben übernehmen`}</button>
+          </>}
           <button type="button" className="secondary-wide-button" onClick={() => openManual("note")}><Icon name="note" size={16} />Gesprächsnotiz manuell ergänzen</button>
         </div>
       ) : (
@@ -98,16 +108,16 @@ export function InspectorPanel({ partner, findings, mobileOpen, onCloseMobile, o
               <label>Unternehmen<input name="company" placeholder="Name des Unternehmens" required /></label>
               <label>Betreuende Person<input name="relationshipManager" placeholder="Name der Betreuung" /></label>
               <label>E-Mail-Adresse<input name="email" type="email" placeholder="name@beispiel.de" /></label>
-              <div className="form-footnote"><Icon name="clock" size={14} />Änderungen werden erst nach Bestätigung gespeichert.</div>
+              <div className="form-footnote"><Icon name="clock" size={14} />Der Vermittler wird direkt in der Partnerdatenbank angelegt.</div>
               <button className="confirm-button" type="submit" disabled={saving}><Icon name="plus" size={17} />{saving ? "Wird gespeichert …" : "Vermittler anlegen"}</button>
             </form>
           ) : (
             <form className="entry-form" onSubmit={saveNote}>
-              <label>Vermittler<select name="partnerName" defaultValue={partner.name}><option>{partner.name}</option><option>Neuen Vermittler auswählen …</option></select></label>
-              <label>Gesprächsdatum<input type="date" name="date" defaultValue="2026-11-27" required /></label>
+              <label>Vermittler<input name="partnerName" defaultValue={partner?.name ?? ""} placeholder="Vor- und Nachname" required /></label>
+              <label>Gesprächsdatum<input type="date" name="date" defaultValue={today} required /></label>
               <label>Gesprächsnotiz<textarea name="content" rows={6} placeholder="Themen, Entscheidungen und nächste Schritte …" required /></label>
-              <label className="upload-field"><span>Dokument anhängen</span><div className="upload-control"><Icon name="upload" size={16} /><span>{fileName || "PDF oder DOCX auswählen"}</span><input type="file" accept=".pdf,.doc,.docx,.txt" onChange={(event) => setFileName(event.target.files?.[0]?.name ?? "")} /></div></label>
-              <div className="form-footnote"><Icon name="clock" size={14} />Du kannst die Notiz vor dem Speichern prüfen.</div>
+              <label className="upload-field"><span>Dokument anhängen</span><div className="upload-control"><Icon name="upload" size={16} /><span>{fileName || "PDF, DOCX oder TXT auswählen"}</span><input type="file" accept=".pdf,.doc,.docx,.txt" onChange={(event) => { const selected = event.target.files?.[0] ?? null; setFile(selected); setFileName(selected?.name ?? ""); }} /></div></label>
+              <div className="form-footnote"><Icon name="clock" size={14} />Die Notiz wird mit dem optionalen Anhang in der Partnerakte gespeichert.</div>
               <button className="confirm-button" type="submit" disabled={saving}><Icon name="plus" size={17} />{saving ? "Wird gespeichert …" : "Gesprächsnotiz speichern"}</button>
             </form>
           )}
