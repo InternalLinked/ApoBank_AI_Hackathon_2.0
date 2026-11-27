@@ -13,18 +13,138 @@ import type {
 
 type ApiRecord = Record<string, unknown>;
 
+/** Fehler aus einem API-Aufruf, inkl. allem, was man zum Nachschlagen im Backend-Log braucht. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number | null,
+    readonly code: string,
+    readonly endpoint: string,
+    readonly requestId: string | null = null,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+
+  /** Kurzzeile für die Oberfläche, z. B. „HTTP 500 · INTERNER_FEHLER · Ref a1b2c3“. */
+  get reference(): string {
+    return [this.status ? `HTTP ${this.status}` : null, this.code, this.requestId ? `Ref ${this.requestId}` : null]
+      .filter(Boolean)
+      .join(" · ");
+  }
+}
+
+const STATUS_TEXT: Record<number, string> = {
+  400: "Die Anfrage war ungültig.",
+  401: "Nicht angemeldet.",
+  403: "Keine Berechtigung.",
+  404: "Nicht gefunden.",
+  409: "Konflikt mit vorhandenen Daten.",
+  413: "Die Datei ist zu groß.",
+  422: "Eingabe ungültig.",
+  500: "Interner Serverfehler.",
+  502: "Backend nicht erreichbar (Gateway).",
+  503: "Backend vorübergehend nicht verfügbar.",
+  504: "Backend hat nicht rechtzeitig geantwortet.",
+};
+
+function detailText(data: ApiRecord): string | null {
+  if (typeof data.meldung === "string" && data.meldung) return data.meldung;
+  if (typeof data.detail === "string" && data.detail) return data.detail;
+  if (Array.isArray(data.detail)) {
+    // FastAPI-Validierungsfehler: [{loc: ["body", "feld"], msg: "..."}]
+    const parts = data.detail.map((entry) => {
+      const item = record(entry);
+      const loc = Array.isArray(item.loc) ? item.loc.filter((part) => part !== "body").join(".") : "";
+      return `${loc ? `${loc}: ` : ""}${String(item.msg ?? "ungültig")}`;
+    });
+    if (parts.length > 0) return `Eingabe ungültig – ${parts.join("; ")}`;
+  }
+  return null;
+}
+
+const CLIENT_ID_KEY = "apobank.clientId";
+let cachedClientId: string | null = null;
+
+function randomId(): string {
+  // crypto.randomUUID gibt es nur in sicheren Kontexten (HTTPS/localhost); getRandomValues überall.
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Zufällige ID dieses Browsers. Das Backend zeigt nur Chats mit derselben ID.
+ * Trennt die Ansicht, ist aber KEIN Zugriffsschutz (wer die ID kennt, sieht die Chats).
+ */
+function clientId(): string {
+  if (cachedClientId) return cachedClientId;
+  try {
+    const stored = window.localStorage.getItem(CLIENT_ID_KEY);
+    if (stored && /^[A-Za-z0-9-]{16,64}$/.test(stored)) return (cachedClientId = stored);
+    const created = randomId();
+    window.localStorage.setItem(CLIENT_ID_KEY, created);
+    return (cachedClientId = created);
+  } catch {
+    // localStorage gesperrt (z. B. strikter Privatmodus): ID gilt nur bis zum Neuladen.
+    return (cachedClientId = randomId());
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const isLocalFrontend = typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname) && window.location.port === "3000";
   const apiBase = isLocalFrontend ? "http://127.0.0.1:8000/api" : "/api";
-  const response = await fetch(`${apiBase}${path}`, {
-    ...init,
-    headers: init?.body instanceof FormData ? init.headers : { "Content-Type": "application/json", ...init?.headers },
-  });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(typeof data.detail === "string" ? data.detail : "Die Anfrage konnte nicht verarbeitet werden.");
+  const method = (init?.method ?? "GET").toUpperCase();
+  const endpoint = `${method} ${path.split("?")[0]}`;
+
+  let response: Response;
+  try {
+    const headers = new Headers(init?.headers);
+    headers.set("X-Client-ID", clientId());
+    // Bei FormData setzt der Browser Content-Type inkl. Boundary selbst.
+    if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+    response = await fetch(`${apiBase}${path}`, { ...init, headers });
+  } catch (cause) {
+    const error = new ApiError(
+      `Backend nicht erreichbar (${apiBase}). Läuft der Server?`,
+      null,
+      "NETZWERK",
+      endpoint,
+    );
+    console.error(`[API] ${endpoint} – Netzwerkfehler`, cause);
+    throw error;
   }
-  return response.json() as Promise<T>;
+
+  const requestId = response.headers.get("X-Request-ID");
+  if (!response.ok) {
+    const raw = await response.text().catch(() => "");
+    let data: ApiRecord = {};
+    try { data = record(JSON.parse(raw)); } catch { /* kein JSON, z. B. HTML vom Proxy */ }
+    const message = detailText(data) ?? STATUS_TEXT[response.status] ?? `Unerwartete Antwort vom Server (${response.statusText || "ohne Statustext"}).`;
+    const error = new ApiError(
+      message,
+      response.status,
+      typeof data.fehler_code === "string" ? data.fehler_code : `HTTP_${response.status}`,
+      endpoint,
+      typeof data.request_id === "string" ? data.request_id : requestId,
+    );
+    console.error(`[API] ${endpoint} -> ${response.status} [${error.code}]${error.requestId ? ` ref=${error.requestId}` : ""}: ${message}`, data.detail ?? raw.slice(0, 500));
+    throw error;
+  }
+  if (response.status === 204) return undefined as T;
+  try {
+    return await response.json() as T;
+  } catch (cause) {
+    console.error(`[API] ${endpoint} – Antwort ist kein gültiges JSON`, cause);
+    throw new ApiError("Der Server hat eine unlesbare Antwort geschickt.", response.status, "UNGUELTIGE_ANTWORT", endpoint, requestId);
+  }
+}
+
+/** Fehlertext für Toasts: Meldung plus Referenz (Status, Code, Request-ID). */
+export function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) return `${error.message} (${error.reference})`;
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
 }
 
 function record(value: unknown): ApiRecord {
@@ -80,7 +200,7 @@ function toMessage(value: unknown): ChatMessage {
   const item = record(value);
   const metadata = record(item.metadata);
   return {
-    id: String(item.id ?? crypto.randomUUID()),
+    id: String(item.id ?? randomId()),
     role: item.role === "user" ? "user" : "assistant",
     content: String(item.content ?? ""),
     createdAt: dateLabel(item.created_at),
@@ -215,13 +335,25 @@ export function createWorkspaceApi(): WorkspaceApi {
       }));
     },
 
+    async deleteConversation(conversationId: string): Promise<void> {
+      await request<void>(`/chat/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" });
+    },
+
     async sendMessage(conversationId: string, content: string): Promise<ChatReply> {
       const data = record(await request<unknown>(`/chat/conversations/${conversationId}/messages`, {
         method: "POST",
         body: JSON.stringify({ inhalt: content }),
       }));
       const message = toMessage(data.message);
+      const fehler = record(data.fehler);
+      let error: string | undefined;
+      if (typeof fehler.code === "string") {
+        const reference = [fehler.code, typeof fehler.status === "number" ? `HTTP ${fehler.status}` : null].filter(Boolean).join(" · ");
+        error = `${String(fehler.meldung ?? "KI-Fehler")} (${reference})`;
+        console.error(`[Copilot] ${error}`);
+      }
       return {
+        error,
         message,
         partner: toPartner(data.partner),
         findings: findingsFrom(data.findings),

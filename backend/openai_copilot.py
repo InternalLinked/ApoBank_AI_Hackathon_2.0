@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import json
 import re
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 from typing import Any
 
 from . import db, obsidian
 from .config import settings
+
+logger = logging.getLogger("apobank.copilot")
 
 
 SYSTEM_INSTRUCTIONS = """
@@ -114,6 +117,49 @@ class CopilotReply:
     vermittler_nr: int | None = None
     findings: list[dict[str, str]] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
+    fehler: dict[str, Any] | None = None  # {"code", "status", "meldung"} fuer die Oberflaeche
+
+
+def _fehler_reply(code: str, meldung: str, status: int | None = None) -> CopilotReply:
+    status_text = f", HTTP {status}" if status else ""
+    return CopilotReply(
+        content=f"{meldung}\n\n`Fehlercode: {code}{status_text}`",
+        configured=True,
+        fehler={"code": code, "status": status, "meldung": meldung},
+    )
+
+
+def _openai_fehler(exc: Exception) -> CopilotReply:
+    """Uebersetzt OpenAI-SDK-Fehler in verstaendliche Meldungen mit stabilem Fehlercode."""
+    import openai
+
+    status = getattr(exc, "status_code", None)
+    if isinstance(exc, openai.AuthenticationError):
+        return _fehler_reply("OPENAI_AUTH", "Der OpenAI-API-Schluessel ist ungueltig oder abgelaufen. "
+                             "Bitte `OPENAI_API_KEY` im Backend pruefen.", status)
+    if isinstance(exc, openai.PermissionDeniedError):
+        return _fehler_reply("OPENAI_ZUGRIFF", "Der API-Schluessel hat keinen Zugriff auf dieses Modell "
+                             "oder diese Region.", status)
+    if isinstance(exc, openai.NotFoundError):
+        return _fehler_reply("OPENAI_MODELL", f"Das Modell `{settings.openai_model}` ist nicht verfuegbar. "
+                             "Bitte `OPENAI_MODEL` pruefen.", status)
+    if isinstance(exc, openai.RateLimitError):
+        return _fehler_reply("OPENAI_LIMIT", "OpenAI-Limit erreicht (zu viele Anfragen oder kein Guthaben). "
+                             "Bitte kurz warten oder das Kontingent pruefen.", status)
+    if isinstance(exc, openai.BadRequestError):
+        return _fehler_reply("OPENAI_ANFRAGE", f"OpenAI hat die Anfrage abgelehnt: {getattr(exc, 'message', exc)}",
+                             status)
+    if isinstance(exc, openai.APITimeoutError):
+        return _fehler_reply("OPENAI_TIMEOUT", f"OpenAI hat nicht innerhalb von {settings.openai_timeout_s} s "
+                             "geantwortet. Bitte erneut versuchen.")
+    if isinstance(exc, openai.APIConnectionError):
+        return _fehler_reply("OPENAI_VERBINDUNG", "Das Backend erreicht OpenAI nicht (Netzwerk, Proxy oder "
+                             "Firewall pruefen).")
+    if isinstance(exc, openai.APIStatusError):
+        return _fehler_reply("OPENAI_SERVER", "OpenAI meldet einen Serverfehler. Bitte spaeter erneut versuchen.",
+                             status)
+    return _fehler_reply("COPILOT_INTERN", f"Interner Fehler im Copilot ({type(exc).__name__}). "
+                         "Details stehen im Backend-Log.")
 
 
 def _search_vermittler(conn: sqlite3.Connection, suchbegriff: str) -> dict[str, Any]:
@@ -291,6 +337,7 @@ def antwort_auf_nachricht(conn: sqlite3.Connection, history: list[dict[str, str]
                     arguments = json.loads(call.arguments)
                     output, nr, proposed, source = _execute_tool(conn, call.name, arguments)
                 except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                    logger.warning("Werkzeug %s mit ungueltigen Parametern aufgerufen: %s", call.name, exc)
                     output, nr, proposed, source = {"fehler": f"Werkzeugparameter ungueltig: {exc}"}, None, [], None
                 if nr is not None:
                     selected_vermittler = nr
@@ -298,12 +345,12 @@ def antwort_auf_nachricht(conn: sqlite3.Connection, history: list[dict[str, str]
                 if source and source not in sources:
                     sources.append(source)
                 input_items.append({"type": "function_call_output", "call_id": call.call_id, "output": json.dumps(output, ensure_ascii=False, default=str)})
-    except Exception:
-        return CopilotReply(
-            content="Die KI-Antwort konnte gerade nicht erzeugt werden. Bitte versuche es erneut.",
-            configured=True,
-        )
+    except Exception as exc:
+        reply = _openai_fehler(exc)
+        logger.exception("Copilot-Antwort fehlgeschlagen [%s] (Modell %s)", reply.fehler["code"], settings.openai_model)
+        return reply
 
+    logger.warning("Copilot-Tool-Loop nach 4 Runden abgebrochen")
     return CopilotReply(
         content="Die Anfrage brauchte zu viele Zwischenschritte. Bitte formuliere sie etwas konkreter.",
         configured=True,

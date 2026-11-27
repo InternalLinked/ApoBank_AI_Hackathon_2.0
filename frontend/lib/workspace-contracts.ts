@@ -101,11 +101,14 @@ export type ChatReply = {
   partner: PartnerSummary | null;
   findings: ExtractedFinding[];
   aiConfigured: boolean;
+  /** Gesetzt, wenn der Copilot einen Fehler gemeldet hat (z. B. „… (OPENAI_AUTH · HTTP 401)“). */
+  error?: string;
 };
 
 export interface WorkspaceApi {
   loadWorkspace(): Promise<WorkspaceSnapshot>;
   createConversation(): Promise<Conversation>;
+  deleteConversation(conversationId: string): Promise<void>;
   sendMessage(conversationId: string, content: string): Promise<ChatReply>;
   getPartnerDetail(vermittlerNr: number): Promise<PartnerDetail>;
   createEntry(input: ManualEntryInput): Promise<SavedEntry>;

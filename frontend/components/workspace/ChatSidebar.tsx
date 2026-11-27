@@ -9,6 +9,7 @@ type ChatSidebarProps = {
   onCloseMobile: () => void;
   onSelect: (id: string) => void;
   onNewConversation: () => void;
+  onDelete: (id: string) => void;
 };
 
 export function ChatSidebar({
@@ -18,6 +19,7 @@ export function ChatSidebar({
   onCloseMobile,
   onSelect,
   onNewConversation,
+  onDelete,
 }: ChatSidebarProps) {
   const [query, setQuery] = useState("");
   const filtered = useMemo(
@@ -54,16 +56,28 @@ export function ChatSidebar({
       <div className="sidebar-section-label"><span>Letzte Chats</span><button className="icon-button tiny" aria-label="Chats filtern"><Icon name="filter" size={15} /></button></div>
       <nav className="conversation-list">
         {filtered.map((conversation) => (
-          <button
-            type="button"
-            key={conversation.id}
-            className={`conversation-item ${conversation.id === activeConversationId ? "is-active" : ""}`}
-            onClick={() => { onSelect(conversation.id); onCloseMobile(); }}
-          >
-            <span className="conversation-icon"><Icon name="chat" size={16} /></span>
-            <span className="conversation-copy"><strong>{conversation.title}</strong><small>{conversation.preview}</small></span>
-            <span className="conversation-time">{conversation.updatedAt}</span>
-          </button>
+          <div className="conversation-row" key={conversation.id}>
+            <button
+              type="button"
+              className={`conversation-item ${conversation.id === activeConversationId ? "is-active" : ""}`}
+              onClick={() => { onSelect(conversation.id); onCloseMobile(); }}
+            >
+              <span className="conversation-icon"><Icon name="chat" size={16} /></span>
+              <span className="conversation-copy"><strong>{conversation.title}</strong><small>{conversation.preview}</small></span>
+              <span className="conversation-time">{conversation.updatedAt}</span>
+            </button>
+            <button
+              type="button"
+              className="icon-button tiny conversation-delete"
+              aria-label={`Chat „${conversation.title}“ löschen`}
+              title="Chat löschen"
+              onClick={() => {
+                if (window.confirm(`Chat „${conversation.title}“ endgültig löschen?`)) onDelete(conversation.id);
+              }}
+            >
+              <Icon name="trash" size={15} />
+            </button>
+          </div>
         ))}
         {filtered.length === 0 && <p className="empty-search">Keine Chats gefunden.</p>}
       </nav>

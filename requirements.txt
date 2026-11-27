@@ -7,3 +7,5 @@ openai>=1.0
 python-multipart>=0.0.9
 python-dotenv>=1.0
 pytest>=8
+# KI-Copilot (backend/copilot): Amazon Bedrock; ohne Bedrock (LLM_PROVIDER=fake) nicht erforderlich
+boto3>=1.40

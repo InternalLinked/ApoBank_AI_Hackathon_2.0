@@ -6,6 +6,8 @@ Doku:   http://127.0.0.1:8000/docs   (OpenAPI: /openapi.json -> direkt als Tool-
 from __future__ import annotations
 
 import json
+import logging
+import re
 import sqlite3
 import time
 from contextlib import asynccontextmanager
@@ -14,12 +16,15 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import copilot, db, obsidian
+from . import db, obsidian, openai_copilot
 from .config import settings
 from .schemas import (ChatKonversationCreate, ChatNachrichtIn, EintragIn, GeschaeftszahlIn, SqlQueryIn,
                       VermittlerCreate, VermittlerUpdate, ZusammenfassungIn)
@@ -41,20 +46,76 @@ app = FastAPI(
         "von Wissen (Gespraechsprotokolle, Notizen, Massnahmen, KI-Zusammenfassungen)."
     ),
 )
+logger = logging.getLogger("apobank")
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+
+FEHLER_CODES = {400: "UNGUELTIGE_ANFRAGE", 404: "NICHT_GEFUNDEN", 405: "METHODE_NICHT_ERLAUBT",
+                409: "KONFLIKT", 422: "VALIDIERUNG", 500: "INTERNER_FEHLER"}
+
+
+def _fehler_json(request: Request, status: int, detail: Any, code: str | None = None,
+                 headers: dict[str, str] | None = None, **extra: Any) -> JSONResponse:
+    """Einheitliches Fehlerformat: `detail` (wie FastAPI), `fehler_code`, `request_id` fuers Log."""
+    request_id = getattr(request.state, "request_id", None)
+    return JSONResponse(
+        status_code=status,
+        content={"detail": detail, "fehler_code": code or FEHLER_CODES.get(status, f"HTTP_{status}"),
+                 "request_id": request_id, **extra},
+        headers={**(headers or {}), **({"X-Request-ID": request_id} if request_id else {})},
+    )
+
+
+# Vor CORSMiddleware registriert und damit innerhalb davon: auch 500er tragen CORS-Header,
+# sonst sieht der Browser nur "Failed to fetch" statt der Fehlermeldung.
+@app.middleware("http")
+async def _request_log(request: Request, call_next):
+    request.state.request_id = uuid4().hex[:12]
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception("%s %s -> 500 [%s]", request.method, request.url.path, request.state.request_id)
+        return _fehler_json(request, 500, "Interner Serverfehler. Details stehen im Backend-Log.")
+    if request.url.path.startswith("/api"):
+        dauer_ms = (time.perf_counter() - start) * 1000
+        level = logging.WARNING if response.status_code >= 400 else logging.INFO
+        logger.log(level, "%s %s -> %s (%.0f ms) [%s]", request.method, request.url.path,
+                   response.status_code, dauer_ms, request.state.request_id)
+    response.headers["X-Request-ID"] = request.state.request_id
+    return response
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
 
 Conn = sqlite3.Connection
 
 
+@app.exception_handler(StarletteHTTPException)
+def _http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    return _fehler_json(request, exc.status_code, exc.detail, headers=exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    errors = jsonable_encoder(exc.errors())
+    meldung = "; ".join(
+        f"{'.'.join(str(p) for p in e.get('loc', []) if p != 'body') or 'Anfrage'}: {e.get('msg', '')}" for e in errors
+    )
+    return _fehler_json(request, 422, errors, meldung=f"Eingabe ungueltig – {meldung}")
+
+
 @app.exception_handler(sqlite3.IntegrityError)
-def _integrity_error(_: Request, exc: sqlite3.IntegrityError) -> JSONResponse:
-    return JSONResponse(status_code=409, content={"detail": f"Datenbank-Konflikt: {exc}"})
+def _integrity_error(request: Request, exc: sqlite3.IntegrityError) -> JSONResponse:
+    logger.warning("Datenbank-Konflikt [%s]: %s", getattr(request.state, "request_id", "-"), exc)
+    return _fehler_json(request, 409, f"Datenbank-Konflikt: {exc}")
 
 
 def _require(conn: Conn, vermittler_nr: int) -> dict[str, Any]:
@@ -104,6 +165,22 @@ def _chat_message(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": row["erstellt_am"],
         "metadata": _decode_metadata(row["metadaten_json"]),
     }
+
+
+CHAT_KONVERSATION_FIELDS = (
+    "c.id, c.titel, c.vermittler_nr, c.aktualisiert_am, "
+    "COALESCE((SELECT inhalt FROM chat_nachricht m WHERE m.konversation_id = c.id ORDER BY m.id DESC LIMIT 1), "
+    "'Noch keine Nachrichten') AS vorschau"
+)
+
+
+def _chat_konversation(conn: Conn, conversation_id: str) -> dict[str, Any]:
+    row = conn.execute(
+        f"SELECT {CHAT_KONVERSATION_FIELDS} FROM chat_konversation c WHERE c.id = ?", (conversation_id,)
+    ).fetchone()
+    if row is None:
+        raise HTTPException(404, "Chat nicht gefunden")
+    return dict(row)
 
 
 @app.get("/api/health", tags=["Meta"], summary="Laufzeitstatus fuer die Weboberflaeche")
@@ -492,13 +569,30 @@ def ueberblick(marktgebiet: str | None = None, filial_nr: int | None = None, mit
 
 # =========================================================================== Chat / OpenAI
 
-@app.get("/api/chat/workspace", tags=["Chat"], summary="Gespeicherte Chatverlaeufe fuer die Weboberflaeche")
-def get_chat_workspace(conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9-]{16,64}$")
+
+
+def client_id(x_client_id: str | None = Header(None, description="Zufaellige Browser-ID; trennt Chats pro Browser "
+                                                                  "(keine Authentifizierung)")) -> str:
+    """Chats gehoeren dem Browser, der sie angelegt hat. Ohne gueltige ID kein Zugriff auf Chats."""
+    if not x_client_id or not CLIENT_ID_RE.match(x_client_id):
+        raise HTTPException(400, "Header X-Client-ID fehlt oder ist ungueltig (16-64 Zeichen, A-Z, 0-9, -).")
+    return x_client_id
+
+
+def _eigener_chat(conn: Conn, conversation_id: str, client: str) -> sqlite3.Row:
+    row = conn.execute("SELECT id, titel FROM chat_konversation WHERE id = ? AND client_id = ?",
+                       (conversation_id, client)).fetchone()
+    if row is None:  # fremde Chats bewusst ebenfalls 404, damit ihre Existenz nicht verraten wird
+        raise HTTPException(404, "Chat nicht gefunden")
+    return row
+
+
+@app.get("/api/chat/workspace", tags=["Chat"], summary="Gespeicherte Chatverlaeufe dieses Browsers")
+def get_chat_workspace(client: str = Depends(client_id), conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
     conversations = db.rows_to_dicts(conn.execute(
-        "SELECT c.id, c.titel, c.vermittler_nr, c.aktualisiert_am, "
-        "COALESCE((SELECT inhalt FROM chat_nachricht m WHERE m.konversation_id = c.id ORDER BY m.id DESC LIMIT 1), "
-        "'Noch keine Nachrichten') AS vorschau "
-        "FROM chat_konversation c ORDER BY c.aktualisiert_am DESC, c.erstellt_am DESC"
+        f"SELECT {CHAT_KONVERSATION_FIELDS} FROM chat_konversation c WHERE c.client_id = ? "
+        "ORDER BY c.aktualisiert_am DESC, c.erstellt_am DESC", (client,)
     ).fetchall())
     messages: dict[str, list[dict[str, Any]]] = {}
     for conversation in conversations:
@@ -515,32 +609,40 @@ def get_chat_workspace(conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
 
 
 @app.post("/api/chat/conversations", tags=["Chat"], status_code=201, summary="Neuen Chat anlegen")
-def create_chat_conversation(body: ChatKonversationCreate, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+def create_chat_conversation(body: ChatKonversationCreate, client: str = Depends(client_id),
+                             conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
     # Mehrfaches Klicken auf "Neuer Chat" darf keine Liste leerer Unterhaltungen erzeugen.
     empty_conversation = conn.execute(
         "SELECT c.id, c.titel, c.vermittler_nr, c.aktualisiert_am, 'Noch keine Nachrichten' AS vorschau "
         "FROM chat_konversation c WHERE NOT EXISTS ("
         "SELECT 1 FROM chat_nachricht m WHERE m.konversation_id = c.id"
-        ") ORDER BY c.aktualisiert_am DESC, c.erstellt_am DESC LIMIT 1"
+        ") AND c.client_id = ? AND ? = 'Neue Unterhaltung' ORDER BY c.aktualisiert_am DESC, c.erstellt_am DESC LIMIT 1",
+        (client, body.titel.strip()),
     ).fetchone()
     if empty_conversation is not None:
         return dict(empty_conversation)
 
     conversation_id = str(uuid4())
-    conn.execute("INSERT INTO chat_konversation (id, titel) VALUES (?, ?)", (conversation_id, body.titel.strip()))
-    row = conn.execute(
-        "SELECT id, titel, vermittler_nr, aktualisiert_am, 'Noch keine Nachrichten' AS vorschau "
-        "FROM chat_konversation WHERE id = ?", (conversation_id,)
-    ).fetchone()
-    return dict(row)
+    conn.execute("INSERT INTO chat_konversation (id, titel, client_id) VALUES (?, ?, ?)",
+                 (conversation_id, body.titel.strip(), client))
+    return _chat_konversation(conn, conversation_id)
+
+
+@app.delete("/api/chat/conversations/{conversation_id}", tags=["Chat"], status_code=204,
+            summary="Chat samt allen Nachrichten endgueltig loeschen")
+def delete_chat_conversation(conversation_id: str, client: str = Depends(client_id),
+                             conn: Conn = Depends(db.get_conn)) -> Response:
+    _eigener_chat(conn, conversation_id, client)
+    conn.execute("DELETE FROM chat_nachricht WHERE konversation_id = ?", (conversation_id,))
+    conn.execute("DELETE FROM chat_konversation WHERE id = ?", (conversation_id,))
+    return Response(status_code=204)
 
 
 @app.post("/api/chat/conversations/{conversation_id}/messages", tags=["Chat"],
           summary="Nachricht speichern und ueber OpenAI mit Datenwerkzeugen beantworten")
-def send_chat_message(conversation_id: str, body: ChatNachrichtIn, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
-    conversation = conn.execute("SELECT id, titel FROM chat_konversation WHERE id = ?", (conversation_id,)).fetchone()
-    if conversation is None:
-        raise HTTPException(404, "Chat nicht gefunden")
+def send_chat_message(conversation_id: str, body: ChatNachrichtIn, client: str = Depends(client_id),
+                      conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    conversation = _eigener_chat(conn, conversation_id, client)
 
     content = body.inhalt.strip()
     conn.execute(
@@ -552,7 +654,7 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, conn: Conn = 
         (conversation_id,),
     ).fetchall()
     history = [{"role": row["rolle"], "content": row["inhalt"]} for row in reversed(history_rows)]
-    reply = copilot.antwort_auf_nachricht(conn, history)
+    reply = openai_copilot.antwort_auf_nachricht(conn, history)
     partner = _partner_summary(db.get_vermittler_full(conn, reply.vermittler_nr)) if reply.vermittler_nr else None
     metadata = {
         "findings": reply.findings,
@@ -560,6 +662,7 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, conn: Conn = 
         "partner": partner,
         "sources": reply.sources,
         "openai_configured": reply.configured,
+        "fehler": reply.fehler,
     }
     cursor = conn.execute(
         "INSERT INTO chat_nachricht (konversation_id, rolle, inhalt, metadaten_json) VALUES (?, 'assistant', ?, ?)",
@@ -575,7 +678,7 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, conn: Conn = 
         "SELECT id, rolle, inhalt, metadaten_json, erstellt_am FROM chat_nachricht WHERE id = ?", (cursor.lastrowid,)
     ).fetchone()
     return {"message": _chat_message(message), "partner": partner, "findings": reply.findings,
-            "openai_configured": reply.configured}
+            "openai_configured": reply.configured, "fehler": reply.fehler}
 
 
 # =========================================================================== Obsidian-Gehirn
@@ -700,5 +803,10 @@ def search_obsidian(q: str = Query(min_length=2), limit: int = Query(20, ge=1, l
 # ueber FastAPI aus. Lokal bleibt `npm run dev` moeglich; die API wird dabei per
 # Next.js-Rewrite auf Port 8000 weitergeleitet.
 _frontend_out = Path(__file__).resolve().parent.parent / "frontend" / "out"
+try:
+    from .copilot.router import router as copilot_router
+    app.include_router(copilot_router)
+except ImportError:
+    logger.warning("Der optionale Team-Copilot-Router ist nicht verfügbar.")
 if _frontend_out.is_dir():
     app.mount("/", StaticFiles(directory=str(_frontend_out), html=True), name="frontend")

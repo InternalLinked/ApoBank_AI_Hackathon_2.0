@@ -5,29 +5,27 @@ env:
     AWS_ACCOUNT_ID: "580218335461"
     AWS_DEFAULT_REGION: "us-west-2"
     ECR_REPO: "apobank-hackathon"
-    IMAGE_TAG: "latest"
 
 phases:
   pre_build:
     commands:
       - echo Logging in to Amazon ECR...
       - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
-      - IMAGE_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPO
+      - REGISTRY=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
       - COMMIT_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-7)
+      - echo "Build commit $COMMIT_TAG"
 
   build:
     commands:
-      - echo Building Docker image...
-      - docker build -t $IMAGE_URI:$COMMIT_TAG .
-      - docker tag $IMAGE_URI:$COMMIT_TAG $IMAGE_URI:latest
+      - echo Building combined frontend+backend image...
+      - docker build -t $REGISTRY/$ECR_REPO:$COMMIT_TAG -t $REGISTRY/$ECR_REPO:latest .
 
   post_build:
     commands:
       - echo Pushing image to ECR...
-      - docker push $IMAGE_URI:$COMMIT_TAG
-      - docker push $IMAGE_URI:latest
-      - echo Writing imagedefinitions.json for ECS deployment...
-      - printf '[{"name":"apobank-frontend","imageUri":"%s:%s"}]' "$IMAGE_URI" "$COMMIT_TAG" > imagedefinitions.json
+      - docker push $REGISTRY/$ECR_REPO:$COMMIT_TAG
+      - docker push $REGISTRY/$ECR_REPO:latest
+      - printf '[{"name":"apobank-frontend","imageUri":"%s:%s"}]' "$REGISTRY/$ECR_REPO" "$COMMIT_TAG" > imagedefinitions.json
 
 artifacts:
   files:
