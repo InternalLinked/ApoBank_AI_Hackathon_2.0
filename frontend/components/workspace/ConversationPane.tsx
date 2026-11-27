@@ -5,6 +5,15 @@ import { Icon } from "./Icons";
 
 type PaneTab = "chat" | "analyse";
 
+const STARTER_PROMPTS: Array<{ label: string; hint: string; prompt: string }> = [
+  { label: "Top 10 nach Volumen", hint: "Ranking 2025 mit Diagramm", prompt: "Zeige die Top 10 Vermittler nach Volumen 2025." },
+  { label: "Größte Einbrüche", hint: "Vergleich 2024 → 2025", prompt: "Welche 10 Vermittler sind von 2024 auf 2025 beim Volumen am stärksten eingebrochen?" },
+  { label: "Gespräch vorbereiten", hint: "Dr. Hans Baumann (4251)", prompt: "Bereite mich auf das Gespräch mit Dr. Hans Baumann (Vermittler 4251) vor." },
+  { label: "Marktgebiete vergleichen", hint: "Volumen 2025 je Region", prompt: "Vergleiche das Volumen 2025 nach Marktgebiet." },
+  { label: "Portfolio-Überblick", hint: "Status und Regionen", prompt: "Gib mir einen Überblick über das Vermittlerportfolio." },
+  { label: "Notizen durchsuchen", hint: "z. B. Praxisfinanzierung", prompt: "Suche in den Gesprächsnotizen nach Praxisfinanzierung." },
+];
+
 type ConversationPaneProps = {
   conversation: Conversation | undefined;
   messages: ChatMessage[];
@@ -91,7 +100,7 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
       <div className="message-scroll">
         <div className="message-column">
           {messages.length === 0 ? (
-            <div className="empty-conversation"><div className="empty-orbit"><Icon name="sparkle" size={23} /></div><h2>Womit kann ich helfen?</h2><p>Frage nach einer Partnerakte, Geschäftszahlen oder einem Gesprächsprotokoll.</p><div className="suggestion-chips"><button onClick={() => onSend("Zeig mir die aktuelle Partnerakte")}>Partnerakte ansehen <Icon name="arrow" size={14} /></button><button onClick={() => onSend("Fasse die letzte Gesprächsnotiz zusammen")}>Gesprächsnotiz zusammenfassen <Icon name="arrow" size={14} /></button></div></div>
+            <div className="empty-conversation"><div className="empty-orbit"><Icon name="sparkle" size={23} /></div><h2>Womit kann ich helfen?</h2><p>Frage nach einer Partnerakte, Geschäftszahlen oder einem Gesprächsprotokoll.</p><div className="suggestion-chips suggestion-grid">{STARTER_PROMPTS.map((starter) => <button key={starter.label} type="button" onClick={() => onSend(starter.prompt)}><span><strong>{starter.label}</strong><small>{starter.hint}</small></span><Icon name="arrow" size={14} /></button>)}</div></div>
           ) : messages.map((message) => (
             <article className={`message-row ${message.role}`} key={message.id}>
               {message.role === "assistant" && <div className="assistant-avatar"><Icon name="sparkle" size={15} /></div>}

@@ -110,7 +110,7 @@ export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, o
       </div>
       {partner && <div className="partner-status-row"><span className="status-dot" />{partner.status}<span className="status-separator">·</span><span>Betreut von {partner.relationshipManager}</span></div>}
 
-      {partnerDetail && <section className="partner-profile" aria-label="Daten aus der Partnerdatenbank">
+      {partnerDetail && <section className="partner-profile partner-profile-main" aria-label="Daten aus der Partnerdatenbank">
         <div className="partner-profile-heading"><h3>Partnerprofil</h3>{partnerDetail.obsidianUri ? <a className="obsidian-link" href={partnerDetail.obsidianUri} title="Vermittler-Notiz in Obsidian öffnen">Obsidian-Akte</a> : <span>Live aus Datenbank</span>}</div>
         <dl>
           <div><dt>Vermittler-ID</dt><dd>{partnerDetail.partnerId}</dd></div>
@@ -120,6 +120,7 @@ export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, o
           {partnerDetail.branch && <div><dt>Filiale</dt><dd>{partnerDetail.branch}{partnerDetail.marketArea ? ` · ${partnerDetail.marketArea}` : ""}</dd></div>}
         </dl>
         {partnerDetail.businessFigures[0] && <div className="partner-figure"><span>Volumen {partnerDetail.businessFigures[0].year}</span><strong>{new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(partnerDetail.businessFigures[0].volume)}</strong><small>{partnerDetail.businessFigures[0].loanCount} Darlehen</small></div>}
+        <VolumeHistory figures={partnerDetail.businessFigures} />
         {partnerDetail.interests.length > 0 && <div className="partner-tags">{partnerDetail.interests.slice(0, 3).map((interest) => <span key={interest}>{interest}</span>)}</div>}
       </section>}
 
@@ -212,6 +213,47 @@ function FindingRow({ finding }: { finding: ExtractedFinding }) {
     <div className={`finding-row ${finding.status === "confirmed" ? "is-confirmed" : ""}`}>
       <div><span>{finding.label}</span><strong>{finding.value}</strong><small><Icon name="file" size={12} />{finding.source}</small></div>
       <span className="finding-status" title={finding.status === "confirmed" ? "Übernommen" : "Noch zu prüfen"}>{finding.status === "confirmed" ? <Icon name="check" size={13} /> : <span />}</span>
+    </div>
+  );
+}
+
+
+const euroFormat = new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
+
+function shortEuro(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toLocaleString("de-DE", { maximumFractionDigits: 1 })} Mio.`;
+  if (value >= 1_000) return `${Math.round(value / 1_000).toLocaleString("de-DE")} Tsd.`;
+  return value.toLocaleString("de-DE");
+}
+
+function VolumeHistory({ figures }: { figures: PartnerDetail["businessFigures"] }) {
+  const sorted = [...figures].sort((a, b) => a.year - b.year);
+  if (sorted.length < 2) return null;
+  const currentYear = new Date().getFullYear();
+  const max = Math.max(...sorted.map((figure) => figure.volume), 1);
+  const complete = sorted.filter((figure) => figure.year < currentYear);
+  const last = complete[complete.length - 1];
+  const prev = complete[complete.length - 2];
+  const trend = last && prev && prev.volume > 0 ? ((last.volume - prev.volume) / prev.volume) * 100 : null;
+  return (
+    <div className="volume-history" aria-label="Volumen-Verlauf">
+      <div className="volume-history-head">
+        <span>Volumen-Verlauf</span>
+        {last && prev && trend !== null && <strong className={trend >= 0 ? "trend-up" : "trend-down"} title={`Veränderung ${prev.year} → ${last.year}`}>{trend >= 0 ? "▲" : "▼"} {Math.abs(trend).toLocaleString("de-DE", { maximumFractionDigits: 1 })} % ({prev.year}→{last.year})</strong>}
+      </div>
+      <div className="volume-bars">
+        {sorted.map((figure) => {
+          const partial = figure.year >= currentYear;
+          return (
+            <div key={figure.year} className={`volume-bar${partial ? " is-partial" : ""}`} title={`${figure.year}: ${euroFormat.format(figure.volume)} · ${figure.loanCount} Darlehen${partial ? " (unterjährig)" : ""}`}>
+              <small>{shortEuro(figure.volume)}</small>
+              <div className="volume-bar-track"><div className="volume-bar-fill" style={{ height: `${Math.max(4, (figure.volume / max) * 100)}%` }} /></div>
+              <span>{figure.year}{partial ? "*" : ""}</span>
+            </div>
+          );
+        })}
+      </div>
+      {sorted.some((figure) => figure.year >= currentYear) && <p className="volume-history-note">* laufendes Jahr, noch nicht abgeschlossen</p>}
     </div>
   );
 }
