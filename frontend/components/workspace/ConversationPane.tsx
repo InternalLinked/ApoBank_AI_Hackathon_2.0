@@ -2,6 +2,7 @@ import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "
 import type { ChatMessage, Conversation, PartnerCandidate, PartnerSummary } from "@/lib/workspace-contracts";
 import { AnalysisPanel } from "./AnalysisPanel";
 import { Icon } from "./Icons";
+import { MessageMarkdown } from "./MessageMarkdown";
 
 type PaneTab = "chat" | "analyse";
 
@@ -98,7 +99,7 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
               <div className="message-body">
                 <div className="message-meta"><strong>{message.role === "assistant" ? "Partner-Copilot" : "Du"}</strong><span>{message.createdAt}</span></div>
                 <div className={`message-card ${message.role === "user" ? "user-message-card" : "assistant-message-card"}`}>
-                  <p>{message.content}</p>
+                  {message.role === "assistant" ? <MessageMarkdown content={message.content} /> : <p>{message.content}</p>}
                   {message.metrics && <div className="metric-grid">{message.metrics.map((metric) => <div className={`metric-card tone-${metric.tone ?? "green"}`} key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.detail}</small></div>)}</div>}
                   {message.bullets && <ul className="message-bullets">{message.bullets.map((bullet) => <li key={bullet}><span className="bullet-dot" />{bullet}</li>)}</ul>}
                   {message.candidates && (
