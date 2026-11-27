@@ -67,7 +67,10 @@ export type ManualEntryInput =
       kind: "note";
       partnerName: string;
       date: string;
+      title: string;
       content: string;
+      participants: string;
+      nextSteps: string;
       fileName?: string;
       file?: File | null;
       vermittlerNr?: number;

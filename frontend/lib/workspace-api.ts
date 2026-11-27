@@ -121,6 +121,14 @@ function splitName(fullName: string): { vorname: string; name: string } {
   return { vorname: parts.slice(0, -1).join(" "), name: parts[parts.length - 1] ?? "" };
 }
 
+function toParticipants(value: string): string[] {
+  return value.split(",").map((participant) => participant.trim()).filter(Boolean);
+}
+
+function toNextSteps(value: string): Array<{ beschreibung: string }> {
+  return value.split("\n").map((step) => step.trim()).filter(Boolean).map((beschreibung) => ({ beschreibung }));
+}
+
 async function resolvePartner(input: Extract<ManualEntryInput, { kind: "note" }>): Promise<PartnerSummary> {
   if (input.vermittlerNr) {
     const profile = await request<unknown>(`/vermittler/${input.vermittlerNr}`);
@@ -203,21 +211,27 @@ export function createWorkspaceApi(): WorkspaceApi {
       }
 
       const partner = await resolvePartner(input);
+      const teilnehmer = toParticipants(input.participants);
+      const massnahmen = toNextSteps(input.nextSteps);
       if (input.file) {
         const form = new FormData();
         form.set("file", input.file);
-        form.set("titel", input.file.name);
+        form.set("titel", input.title);
         form.set("inhalt", input.content);
         form.set("datum", input.date);
+        form.set("teilnehmer", teilnehmer.join(","));
+        form.set("massnahmen", massnahmen.map((step) => step.beschreibung).join("\n"));
         await request(`/vermittler/${partner.vermittlerNr}/dokumente`, { method: "POST", body: form });
       } else {
         await request(`/vermittler/${partner.vermittlerNr}/obsidian/eintraege`, {
           method: "POST",
           body: JSON.stringify({
             typ: "gespraech",
-            titel: "Gesprächsnotiz",
+            titel: input.title,
             inhalt: input.content,
             datum: input.date,
+            teilnehmer,
+            massnahmen,
             quelle: "manuell",
             autor: "ui",
           }),

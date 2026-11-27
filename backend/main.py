@@ -610,6 +610,8 @@ async def add_document(
     titel: str | None = Form(None),
     inhalt: str | None = Form(None),
     datum: date | None = Form(None),
+    teilnehmer: str | None = Form(None),
+    massnahmen: str | None = Form(None),
     conn: Conn = Depends(db.get_conn),
 ) -> dict[str, Any]:
     """Legt einen Anhang lokal ab und verlinkt ihn aus einem Obsidian-Dokumenteintrag."""
@@ -635,8 +637,8 @@ async def add_document(
         "titel": (titel or original_name).strip(),
         "inhalt": note_text,
         "datum": datum,
-        "teilnehmer": [],
-        "massnahmen": [],
+        "teilnehmer": [name.strip() for name in (teilnehmer or "").split(",") if name.strip()],
+        "massnahmen": [{"beschreibung": step.strip()} for step in (massnahmen or "").splitlines() if step.strip()],
         "tags": ["upload"],
         "autor": "ui",
         "quelle": "upload",
