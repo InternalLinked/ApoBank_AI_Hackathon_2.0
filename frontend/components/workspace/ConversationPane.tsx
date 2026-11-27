@@ -28,6 +28,8 @@ type ConversationPaneProps = {
   isSending: boolean;
   onSend: (content: string, startSuggestion?: StartSuggestion) => void;
   onOpenChats: () => void;
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
   onOpenDetails: () => void;
   /** Rechte Leiste ist eingefahren (Desktop): Button zum Einblenden zeigen. */
   inspectorCollapsed: boolean;
@@ -44,7 +46,7 @@ type ConversationPaneProps = {
   onRejectProposal: (proposal: ChangeProposal) => Promise<boolean>;
 };
 
-export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, onOpenDetails, inspectorCollapsed, onExpandInspector, onToggleInspector, onSelectCandidate, onOpenPartner, onTranscribe, onError, onConfirmProposal, onRejectProposal }: ConversationPaneProps) {
+export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, sidebarCollapsed, onToggleSidebar, onOpenDetails, inspectorCollapsed, onExpandInspector, onToggleInspector, onSelectCandidate, onOpenPartner, onTranscribe, onError, onConfirmProposal, onRejectProposal }: ConversationPaneProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -115,8 +117,10 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
   return (
     <main className="conversation-pane">
       <header className="topbar">
-        <button className="icon-button mobile-trigger" aria-label="Chatverläufe öffnen" onClick={onOpenChats}><Icon name="menu" /></button>
-        <div className="breadcrumb"><span>Partnervertrieb</span><Icon name="chevron" size={14} /><strong>Unterhaltungen</strong></div>
+        <button className="icon-button chats-mobile-trigger" type="button" aria-controls="chat-sidebar" aria-label="Chatverläufe öffnen" onClick={onOpenChats}><Icon name="menu" /></button>
+        <button className="icon-button sidebar-toggle" type="button" aria-controls="chat-sidebar" aria-expanded={!sidebarCollapsed} aria-label={sidebarCollapsed ? "Chatleiste einblenden" : "Chatleiste einklappen"} title={sidebarCollapsed ? "Chatleiste einblenden" : "Chatleiste einklappen"} onClick={onToggleSidebar}>
+          <Icon name="panel" />
+        </button>
         <div className="topbar-actions">
           <span className={`prototype-pill ${aiConfigured ? "is-ready" : ""}`}><span /> {aiConfigured ? "KI verbunden" : "KI-Key fehlt"}</span>
           <button className="icon-button mobile-trigger" aria-label="Partnerakte öffnen" onClick={onOpenDetails}><Icon name="panel" /></button>
