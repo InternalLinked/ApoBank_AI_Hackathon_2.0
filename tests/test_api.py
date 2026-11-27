@@ -256,3 +256,99 @@ def test_document_upload_persists_participants_and_next_steps(client):
     note = (settings.vault_path / response.json()["datei"]).read_text(encoding="utf-8")
     assert "**Teilnehmer:** Dr. Baumann, Schumann" in note
     assert "- [ ] Konditionen senden" in note and "- [ ] Termin abstimmen" in note
+
+
+def test_persoenliches_profil(client):
+    # Import legt fuer jeden Vermittler eine Profil-Notiz an und verlinkt sie im Hub
+    profil_path = settings.vault_path / obsidian.profil_rel(4251)
+    assert profil_path.exists()
+    hub = (settings.vault_path / obsidian.hub_rel(4251)).read_text(encoding="utf-8")
+    assert "![[VM-4251 Profil]]" in hub
+    assert client.get("/api/vermittler/4251/profil").json()["fakten"] == []
+
+    # Kategorie wird per Stichwort erkannt oder explizit gesetzt
+    hund = client.post("/api/vermittler/4251/profil/fakten", json={"text": "Hat einen Hund namens Tim"})
+    assert hund.status_code == 201, hund.text
+    assert hund.json()["kategorie"] == "haustiere"
+    client.post("/api/vermittler/4251/profil/fakten",
+                json={"text": "War im Oktober auf Mallorca im Urlaub", "datum": "2026-10-20"})
+    client.post("/api/vermittler/4251/profil/fakten", json={"text": "Mag Gespräche am Vormittag", "kategorie": "vorlieben"})
+
+    # Auch von Hand in Obsidian ergaenzte Zeilen werden gelesen
+    text = profil_path.read_text(encoding="utf-8").replace("## Familie\n", "## Familie\n- Tochter Lena studiert Medizin\n")
+    profil_path.write_text(text, encoding="utf-8")
+
+    profil = client.get("/api/vermittler/4251/profil").json()
+    nach_kat = {f["text"]: (f["kategorie"], f["datum"]) for f in profil["fakten"]}
+    assert nach_kat["Hat einen Hund namens Tim"][0] == "haustiere"
+    assert nach_kat["War im Oktober auf Mallorca im Urlaub"] == ("reisen", "2026-10-20")
+    assert nach_kat["Mag Gespräche am Vormittag"][0] == "vorlieben"
+    assert nach_kat["Tochter Lena studiert Medizin"] == ("familie", None)
+    assert profil["uri"].startswith("obsidian://open?vault=") and "Profil" in profil["uri"]
+
+    # Kontext fuer die KI enthaelt das Profil; Re-Sync ueberschreibt es nicht
+    assert "Hund namens Tim" in client.get("/api/vermittler/4251/kontext").json()["kontext_text"]
+    client.post("/api/vermittler/4251/obsidian/sync")
+    assert "Tochter Lena" in profil_path.read_text(encoding="utf-8")
+
+    # Loeschen einzelner Infos
+    fid = hund.json()["id"]
+    assert client.delete(f"/api/vermittler/4251/profil/fakten/{fid}").status_code == 204
+    assert client.delete(f"/api/vermittler/4251/profil/fakten/{fid}").status_code == 404
+    assert "Hund" not in profil_path.read_text(encoding="utf-8")
+    assert client.post("/api/vermittler/999999/profil/fakten", json={"text": "x"}).status_code == 404
+
+
+def test_obsidian_netz(client):
+    client.post("/api/vermittler/4251/profil/fakten", json={"text": "Hat einen Hund namens Tim"})
+    client.post("/api/vermittler/4251/obsidian/eintraege", json={"titel": "Jahresgespräch", "inhalt": "Siehe auch [[VM-500]]."})
+    client.post("/api/vermittler/500/obsidian/eintraege", json={"titel": "Empfehlung", "inhalt": "Kennt [[VM-4251]] gut."})
+
+    netz = client.get("/api/vermittler/4251/obsidian/netz").json()
+    knoten = {k["id"]: k for k in netz["knoten"]}
+    assert netz["zentrum"] == "VM-4251" and knoten["VM-4251"]["typ"] == "vermittler"
+    assert knoten["VM-4251 Profil"]["typ"] == "profil"
+    assert any(k["typ"] == "fakt" and "Tim" in k["label"] for k in knoten.values())
+    assert any(k["typ"] == "eintrag" and k["label"] == "Jahresgespräch" for k in knoten.values())
+    assert knoten["VM-500"]["typ"] == "vermittler-link"  # Wikilink bzw. Backlink
+    assert any(k["typ"] == "betreuer" for k in knoten.values()) and any(k["typ"] == "filiale" for k in knoten.values())
+    ids = set(knoten)
+    assert all(e["von"] in ids and e["nach"] in ids for e in netz["kanten"])
+    assert client.get("/api/vermittler/999999/obsidian/netz").status_code == 404
+
+
+def test_copilot_speichert_direkt_im_obsidian(client):
+    from backend import db, openai_copilot
+    conn = db.connect()
+    try:
+        output, nr, findings, quelle = openai_copilot._execute_tool(conn, "im_obsidian_speichern", {
+            "vermittler_nr": 4251, "angaben": [
+                {"gruppe": "persoenlich", "label": "Haustiere", "wert": "Hat einen Hund namens Tim", "quelle": "Chat"},
+                {"gruppe": "persoenlich", "label": "Reisen & Urlaub", "wert": "War im Oktober auf Mallorca", "quelle": "Chat"},
+                {"gruppe": "business", "label": "Interesse", "wert": "Praxisfinanzierung 2027", "quelle": "Chat"},
+                {"gruppe": "next-step", "label": "Aufgabe", "wert": "Konditionen schicken", "quelle": "Chat"},
+            ]})
+        conn.commit()
+    finally:
+        conn.close()
+    assert output["status"] == "gespeichert" and nr == 4251 and quelle == "Obsidian"
+    assert all(f["status"] == "confirmed" for f in findings) and len(findings) == 4
+
+    profil = {f["text"]: f["kategorie"] for f in client.get("/api/vermittler/4251/profil").json()["fakten"]}
+    assert profil == {"Hat einen Hund namens Tim": "haustiere", "War im Oktober auf Mallorca": "reisen"}
+    eintraege = client.get("/api/vermittler/4251/obsidian/inhalt").json()["eintraege"]
+    notiz = next(e for e in eintraege if e["frontmatter"]["quelle"] == "chat")
+    assert "Praxisfinanzierung 2027" in notiz["inhalt"] and "- [ ] Konditionen schicken" in notiz["inhalt"]
+    rows = client.post("/api/sql/query", json={"sql": "SELECT autor FROM obsidian_eintrag WHERE vermittler_nr = 4251"}).json()
+    assert ["copilot"] in rows["zeilen"]
+
+
+def test_copilot_speichert_nichts_bei_unbekanntem_vermittler(client):
+    from backend import db, openai_copilot
+    conn = db.connect()
+    try:
+        output, nr, findings, _ = openai_copilot._execute_tool(conn, "im_obsidian_speichern", {
+            "vermittler_nr": 999999, "angaben": [{"gruppe": "persoenlich", "label": "x", "wert": "y", "quelle": "c"}]})
+    finally:
+        conn.close()
+    assert "fehler" in output and nr is None and findings == []

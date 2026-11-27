@@ -340,3 +340,48 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
   .add-entry-button span { display: none; }
   .add-entry-button { width: 32px; justify-content: center; padding: 0; }
 }
+
+/* Persönliches Profil (Obsidian) */
+.obsidian-link { color: #5275a4; font-size: 8px; font-weight: 600; text-decoration: none; }
+.obsidian-link:hover { color: #17427f; text-decoration: underline; }
+.personal-profile { margin: 0 17px 16px; padding: 12px; border: 1px solid #eee8d8; border-radius: 11px; background: linear-gradient(145deg, #fffefa, #fffaf0); animation: content-enter .28s ease both; }
+.personal-profile .partner-profile-heading h3 { color: #6f5a2c; }
+.personal-profile-empty { margin: 0 0 10px; color: #8e805f; font-size: 9px; line-height: 1.5; }
+.personal-profile-groups { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.personal-profile-group h4 { margin: 0 0 4px; color: #a28852; font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.personal-profile-group ul { margin: 0; padding: 0; list-style: none; }
+.personal-profile-group li { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; padding: 3px 0; color: #4a3f26; font-size: 10px; line-height: 1.4; }
+.personal-profile-group li small { margin-left: 6px; color: #b3a47f; font-size: 8px; }
+.personal-profile-group li .icon-button { width: 18px; height: 18px; flex: 0 0 auto; opacity: .45; }
+.personal-profile-group li:hover .icon-button { opacity: 1; }
+.personal-profile-form { display: flex; flex-direction: column; gap: 6px; }
+.personal-profile-form input, .personal-profile-form select { min-width: 0; padding: 6px 8px; border: 1px solid #e6dcc4; border-radius: 7px; background: #fff; color: #3b3220; font: inherit; font-size: 10px; }
+.personal-profile-form > div { display: flex; gap: 6px; }
+.personal-profile-form select { flex: 1; }
+.personal-profile-form .add-entry-button:disabled { opacity: .5; cursor: default; }
+
+/* Obsidian-Netz (lokale Graph-Ansicht) */
+.obsidian-graph { margin: 0 17px 16px; padding: 12px; border: 1px solid #262c3a; border-radius: 11px; background: #1e2230; animation: content-enter .28s ease both; }
+.obsidian-graph .partner-profile-heading h3 { color: #dfe4ee; }
+.obsidian-graph .partner-profile-heading span { color: #8d97ab; }
+.obsidian-graph-canvas { aspect-ratio: 320 / 230; }
+.obsidian-graph svg { display: block; width: 100%; height: 100%; }
+.obsidian-graph line { stroke: #4a5266; stroke-width: .8; transition: opacity .15s, stroke .15s; }
+.obsidian-graph line.is-active { stroke: #a9b8d6; stroke-width: 1.2; }
+.obsidian-graph line.is-dimmed { opacity: .25; }
+.obsidian-graph .graph-node { transition: opacity .15s; }
+.obsidian-graph .graph-node.is-link { cursor: pointer; }
+.obsidian-graph .graph-node.is-dimmed { opacity: .25; }
+.obsidian-graph .graph-node circle { stroke: #1e2230; stroke-width: 1.2; }
+.obsidian-graph .graph-node:hover circle { stroke: #fff; }
+.obsidian-graph text { fill: #c3cad8; font-size: 7px; pointer-events: none; }
+.obsidian-graph-hint { overflow: hidden; margin: 6px 0 6px; color: #8d97ab; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.obsidian-graph-legend { display: flex; flex-wrap: wrap; gap: 4px 9px; }
+.obsidian-graph-legend span { display: inline-flex; align-items: center; gap: 4px; color: #a3acbd; font-size: 7.5px; }
+.obsidian-graph-legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+
+/* Rechte Seitenleiste: als Ganzes scrollbar (Partnerprofil, persönliches Profil, Obsidian-Netz, Chat-Angaben) */
+.inspector-panel { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.inspector-panel > * { flex-shrink: 0; }
+.inspector-panel .inspector-scroll { flex: none; overflow: visible; }
+.inspector-panel .inspector-heading { position: sticky; z-index: 2; top: 0; background: #fff; }

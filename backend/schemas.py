@@ -83,6 +83,16 @@ class ZusammenfassungIn(BaseModel):
     quelle: str | None = Field(None, examples=["claude-opus-5-5"])
 
 
+ProfilKategorie = Literal["familie", "haustiere", "hobbys", "reisen", "vorlieben", "termine", "sonstiges"]
+
+
+class ProfilFaktIn(BaseModel):
+    """Persoenliche Info zum Vermittler fuer die Gespraechsvorbereitung (z. B. Hund \"Tim\", Urlaub auf Mallorca)."""
+    text: str = Field(min_length=1, max_length=500, examples=["Hat einen Hund namens Tim"])
+    kategorie: ProfilKategorie | None = Field(None, description="Leer lassen = automatisch per Stichwort erkennen")
+    datum: date | None = Field(None, description="Wann die Info notiert/bekannt wurde, Standard: heute")
+
+
 class SqlQueryIn(BaseModel):
     sql: str = Field(description="Ein einzelnes SELECT/WITH-Statement", examples=[
         "SELECT marktgebiet, COUNT(*) AS n FROM v_vermittler GROUP BY marktgebiet"])

@@ -1,6 +1,8 @@
 import { FormEvent, useState } from "react";
-import type { ExtractedFinding, ManualEntryInput, PartnerDetail, PartnerSummary } from "@/lib/workspace-contracts";
+import type { ExtractedFinding, ManualEntryInput, PartnerDetail, PartnerSummary, WorkspaceApi } from "@/lib/workspace-contracts";
 import { Icon } from "./Icons";
+import { ObsidianGraph } from "./ObsidianGraph";
+import { PersonalProfile } from "./PersonalProfile";
 
 type InspectorPanelProps = {
   partner: PartnerSummary | null;
@@ -10,9 +12,12 @@ type InspectorPanelProps = {
   onCloseMobile: () => void;
   onSaveEntry: (input: ManualEntryInput) => Promise<string>;
   onConfirmFindings: (findingIds: string[]) => void;
+  api: WorkspaceApi;
+  profileRefreshKey: number;
+  onError: (message: string) => void;
 };
 
-export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, onCloseMobile, onSaveEntry, onConfirmFindings }: InspectorPanelProps) {
+export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, onCloseMobile, onSaveEntry, onConfirmFindings, api, profileRefreshKey, onError }: InspectorPanelProps) {
   const today = new Date().toISOString().slice(0, 10);
   const [addOpen, setAddOpen] = useState(false);
   const [entryKind, setEntryKind] = useState<"partner" | "note">("partner");
@@ -20,6 +25,7 @@ export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, o
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [graphVersion, setGraphVersion] = useState(0);
   const pending = findings.filter((finding) => finding.status === "new");
 
   function openAdd(kind?: "partner" | "note") {
@@ -105,7 +111,7 @@ export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, o
       {partner && <div className="partner-status-row"><span className="status-dot" />{partner.status}<span className="status-separator">·</span><span>Betreut von {partner.relationshipManager}</span></div>}
 
       {partnerDetail && <section className="partner-profile" aria-label="Daten aus der Partnerdatenbank">
-        <div className="partner-profile-heading"><h3>Partnerprofil</h3><span>Live aus Datenbank</span></div>
+        <div className="partner-profile-heading"><h3>Partnerprofil</h3>{partnerDetail.obsidianUri ? <a className="obsidian-link" href={partnerDetail.obsidianUri} title="Vermittler-Notiz in Obsidian öffnen">Obsidian-Akte</a> : <span>Live aus Datenbank</span>}</div>
         <dl>
           <div><dt>Vermittler-ID</dt><dd>{partnerDetail.partnerId}</dd></div>
           <div><dt>Unternehmen</dt><dd>{partnerDetail.company}</dd></div>
@@ -117,18 +123,23 @@ export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, o
         {partnerDetail.interests.length > 0 && <div className="partner-tags">{partnerDetail.interests.slice(0, 3).map((interest) => <span key={interest}>{interest}</span>)}</div>}
       </section>}
 
+      {partner && <PersonalProfile api={api} vermittlerNr={partner.vermittlerNr} partnerName={partner.name} refreshKey={profileRefreshKey} onError={onError} onChanged={() => setGraphVersion((version) => version + 1)} />}
+
+      {partner && <ObsidianGraph api={api} vermittlerNr={partner.vermittlerNr} refreshKey={profileRefreshKey + graphVersion} onError={onError} />}
+
       <div className="inspector-tabs inspector-tabs-single" aria-label="Partnerakten-Bereich">
-        <span><Icon name="sparkle" size={15} />Aus dem Chat erkannt{pending.length > 0 && <span className="tab-count">{pending.length}</span>}</span>
+        <span><Icon name="sparkle" size={15} />Aus dem Chat gespeichert{pending.length > 0 && <span className="tab-count">{pending.length}</span>}</span>
       </div>
 
       <div className="inspector-scroll">
-        <div className="section-title-row"><div><h3>Aus dem Chat erkannt</h3><p>Prüfe die Angaben, bevor sie gespeichert werden.</p></div><span className="source-count"><Icon name="file" size={14} />{findings.length} Angaben</span></div>
-        {findings.length === 0 ? <div className="review-note"><Icon name="sparkle" size={15} /><p>Wenn der Copilot konkrete Angaben zu einer Partnerakte erkennt, erscheinen sie hier zur Bestätigung.</p></div> : <>
+        <div className="section-title-row"><div><h3>Aus dem Chat gespeichert</h3><p>Der Copilot legt neue Infos direkt im Obsidian-Netz ab.</p></div><span className="source-count"><Icon name="file" size={14} />{findings.length} Angaben</span></div>
+        {findings.length === 0 ? <div className="review-note"><Icon name="sparkle" size={15} /><p>Erzähl dem Copilot von Gesprächen oder Persönlichem (z. B. „Herr Weber war gerade im Urlaub“) – er speichert es automatisch in Obsidian und listet es hier auf.</p></div> : <>
           <div className="finding-group"><div className="finding-group-heading"><span className="group-icon"><Icon name="person" size={15} /></span><h4>Partner & Gespräch</h4></div>{findings.filter((finding) => finding.group === "partner").map((finding) => <FindingRow key={finding.id} finding={finding} />)}</div>
           <div className="finding-group"><div className="finding-group-heading"><span className="group-icon blue"><Icon name="briefcase" size={15} /></span><h4>Geschäftsdaten</h4></div>{findings.filter((finding) => finding.group === "business").map((finding) => <FindingRow key={finding.id} finding={finding} />)}</div>
           <div className="finding-group"><div className="finding-group-heading"><span className="group-icon amber"><Icon name="calendar" size={15} /></span><h4>Nächster Schritt</h4></div>{findings.filter((finding) => finding.group === "next-step").map((finding) => <FindingRow key={finding.id} finding={finding} />)}</div>
-          <div className="review-note"><Icon name="sparkle" size={15} /><p>Die Angaben stammen aus dem Chat. Vor dem Übernehmen bitte gegenprüfen.</p></div>
-          <button type="button" className={`confirm-button ${pending.length === 0 ? "is-confirmed" : ""}`} disabled={pending.length === 0 || !partner} onClick={() => onConfirmFindings(pending.map((finding) => finding.id))}><Icon name="check" size={17} />{pending.length === 0 ? "Angaben übernommen" : `Alle ${pending.length} Angaben übernehmen`}</button>
+          {findings.some((finding) => finding.group === "persoenlich") && <div className="finding-group"><div className="finding-group-heading"><span className="group-icon"><Icon name="sparkle" size={15} /></span><h4>Persönliches → Profil</h4></div>{findings.filter((finding) => finding.group === "persoenlich").map((finding) => <FindingRow key={finding.id} finding={finding} />)}</div>}
+          <div className="review-note"><Icon name="sparkle" size={15} /><p>Die Angaben stammen aus dem Chat und sind bereits gespeichert. Korrekturen direkt im Profil oder in Obsidian.</p></div>
+          {pending.length > 0 && <button type="button" className={`confirm-button ${pending.length === 0 ? "is-confirmed" : ""}`} disabled={pending.length === 0 || !partner} onClick={() => onConfirmFindings(pending.map((finding) => finding.id))}><Icon name="check" size={17} />{pending.length === 0 ? "Angaben übernommen" : `Alle ${pending.length} Angaben übernehmen`}</button>}
         </>}
       </div>
 

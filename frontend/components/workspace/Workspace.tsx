@@ -25,6 +25,7 @@ export function Workspace() {
   const [mobileDrawer, setMobileDrawer] = useState<"chats" | "details" | null>(null);
   const [toast, setToast] = useState("");
   const [partnerDetail, setPartnerDetail] = useState<PartnerDetail | null>(null);
+  const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   const partnerRequest = useRef(0);
 
   async function loadPartnerDetail(partner: PartnerSummary | null) {
@@ -105,7 +106,11 @@ export function Workspace() {
       addMessage(conversationId, reply.message);
       setSnapshot((current) => ({ ...current, partner: reply.partner ?? current.partner, aiConfigured: reply.aiConfigured }));
       if (reply.partner) void loadPartnerDetail(reply.partner);
-      if (reply.findings.length > 0) setFindings(reply.findings);
+      if (reply.findings.length > 0) {
+        setFindings(reply.findings);
+        // Der Copilot speichert direkt in Obsidian: Profil und Netz neu laden
+        if (reply.findings.some((finding) => finding.status === "confirmed")) setProfileRefreshKey((key) => key + 1);
+      }
       if (reply.error) showError(null, reply.error);
     } catch (error) {
       showError(error, "Die Anfrage konnte nicht beantwortet werden.");
@@ -178,7 +183,9 @@ export function Workspace() {
       return;
     }
     setFindings((current) => current.map((finding) => findingIds.includes(finding.id) ? { ...finding, status: "confirmed" } : finding));
-    setToast("Die bestätigten Angaben wurden als Notiz in der Partnerakte gespeichert.");
+    const personal = selected.some((finding) => finding.group === "persoenlich");
+    if (personal) setProfileRefreshKey((key) => key + 1);
+    setToast(personal ? "Die bestätigten Angaben wurden in der Partnerakte und im persönlichen Profil gespeichert." : "Die bestätigten Angaben wurden als Notiz in der Partnerakte gespeichert.");
   }
 
   function selectConversation(conversationId: string) {
@@ -194,7 +201,7 @@ export function Workspace() {
       {mobileDrawer && <button className="mobile-backdrop" aria-label="Seitenleiste schließen" onClick={() => setMobileDrawer(null)} />}
       <ChatSidebar conversations={snapshot.conversations} activeConversationId={activeConversationId} mobileOpen={mobileDrawer === "chats"} onCloseMobile={() => setMobileDrawer(null)} onSelect={selectConversation} onNewConversation={createConversation} onDelete={deleteConversation} />
       <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} onOpenDetails={() => setMobileDrawer("details")} />
-      <InspectorPanel partner={snapshot.partner} partnerDetail={partnerDetail} findings={findings} mobileOpen={mobileDrawer === "details"} onCloseMobile={() => setMobileDrawer(null)} onSaveEntry={saveEntry} onConfirmFindings={confirmFindings} />
+      <InspectorPanel partner={snapshot.partner} partnerDetail={partnerDetail} findings={findings} mobileOpen={mobileDrawer === "details"} onCloseMobile={() => setMobileDrawer(null)} onSaveEntry={saveEntry} onConfirmFindings={confirmFindings} api={api} profileRefreshKey={profileRefreshKey} onError={setToast} />
       {toast && <div className="toast" role="status"><Icon name="check" size={16} />{toast}<button onClick={() => setToast("")} aria-label="Hinweis schließen"><Icon name="close" size={15} /></button></div>}
     </div>
   );

@@ -26,3 +26,9 @@ credentials
 *.pdf
 *.docx
 data/*.csv
+
+# Obsidian-Vault im Repo: nur Grundkonfiguration versionieren, keine Vermittler-Notizen
+# (persoenliche Profile/Gespraeche gehoeren nicht ins oeffentliche Repo)
+Obsidian/hackathon/Vermittler/
+Obsidian/hackathon/.obsidian/workspace*.json
+Obsidian/hackathon/.trash/

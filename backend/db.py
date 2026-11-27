@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Iterator
 from urllib.parse import quote
 
+from . import obsidian
 from .config import settings
 
 SCHEMA_SQL = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
@@ -121,7 +122,10 @@ def get_vermittler_full(conn: sqlite3.Connection, vermittler_nr: int) -> dict[st
         "geschaeftszahlen": zahlen,
         "obsidian": {
             "pfad": v["obsidian_pfad"],
-            "uri": v["obsidian_uri"],
+            # URI live bilden, damit ein umbenannter Vault (APOBANK_VAULT_NAME) sofort greift
+            "uri": obsidian.obsidian_uri(v["obsidian_pfad"]) if v["obsidian_pfad"] else v["obsidian_uri"],
+            "profil_pfad": obsidian.profil_rel(vermittler_nr),
+            "profil_uri": obsidian.obsidian_uri(obsidian.profil_rel(vermittler_nr)),
             "anzahl_eintraege": n_eintraege,
         },
         "erstellt_am": v["erstellt_am"],
