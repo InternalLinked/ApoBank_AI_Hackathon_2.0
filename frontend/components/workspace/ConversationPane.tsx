@@ -3,6 +3,7 @@ import type { ChatMessage, Conversation, PartnerCandidate, PartnerSummary } from
 import { AnalysisPanel } from "./AnalysisPanel";
 import { Icon } from "./Icons";
 import { MessageMarkdown } from "./MessageMarkdown";
+import { VoiceButton } from "./VoiceButton";
 
 type PaneTab = "chat" | "analyse";
 
@@ -16,10 +17,19 @@ type ConversationPaneProps = {
   onOpenChats: () => void;
   onOpenDetails: () => void;
   onSelectCandidate: (candidate: PartnerCandidate) => void;
+  onTranscribe: (pcm: Blob, sampleRate: number) => Promise<string>;
+  onError: (message: string) => void;
 };
 
-export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, onOpenDetails, onSelectCandidate }: ConversationPaneProps) {
+export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, onOpenDetails, onSelectCandidate, onTranscribe, onError }: ConversationPaneProps) {
   const [value, setValue] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Diktierten Text anhängen (nicht ersetzen) und zum Prüfen ins Feld fokussieren – gesendet wird erst per Klick/Enter
+  function insertTranscript(text: string) {
+    setValue((current) => (current.trim() ? `${current.trimEnd()} ${text}` : text));
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  }
   const [tab, setTab] = useState<PaneTab>("chat");
   const [focusedAnalysisId, setFocusedAnalysisId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -143,8 +153,8 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
       <div className="composer-wrap">
         <div className="quick-prompts"><span>Vorschläge</span><button type="button" onClick={() => onSend("Welche Punkte sollte ich im Gespräch ansprechen?")}>Gespräch vorbereiten</button><button type="button" onClick={() => onSend("Zeig mir offene Vorgänge")}>Offene Vorgänge</button><button type="button" onClick={() => onSend("Wer sind die Top 10 Vermittler nach Kreditvolumen?")}>Top-Vermittler</button></div>
         <form className="composer" onSubmit={submit}>
-          <textarea rows={1} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={handleKeyDown} placeholder="Frage zur Partnerakte oder schreibe eine Notiz …" aria-label="Nachricht an den Partner-Copilot" />
-          <div className="composer-footer"><span><Icon name="sparkle" size={14} /> Antworten mit Quellenbezug</span><div className="composer-actions"><button type="button" className="composer-attach" aria-label="Datei anhängen" title="Datei anhängen"><Icon name="file" size={17} /></button><button type="submit" className="send-button" disabled={!value.trim() || isSending} aria-label="Nachricht senden"><Icon name="send" size={16} /></button></div></div>
+          <textarea ref={textareaRef} rows={1} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={handleKeyDown} placeholder="Frage zur Partnerakte oder schreibe eine Notiz … (oder Mikrofon nutzen)" aria-label="Nachricht an den Partner-Copilot" />
+          <div className="composer-footer"><span><Icon name="sparkle" size={14} /> Antworten mit Quellenbezug</span><div className="composer-actions"><button type="button" className="composer-attach" aria-label="Datei anhängen" title="Datei anhängen"><Icon name="file" size={17} /></button><VoiceButton disabled={isSending} onTranscribe={onTranscribe} onText={insertTranscript} onError={onError} /><button type="submit" className="send-button" disabled={!value.trim() || isSending} aria-label="Nachricht senden"><Icon name="send" size={16} /></button></div></div>
         </form>
         <p className="composer-note">Angaben aus dem Chat erst prüfen und anschließend bewusst in die Partnerakte übernehmen.</p>
       </div>

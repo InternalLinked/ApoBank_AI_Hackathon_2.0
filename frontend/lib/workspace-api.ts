@@ -15,6 +15,7 @@ import type {
   ProfileCategory,
   ProfileFact,
   SavedEntry,
+  Transcription,
   WorkspaceApi,
   WorkspaceSnapshot,
 } from "./workspace-contracts";
@@ -417,6 +418,19 @@ export function createWorkspaceApi(): WorkspaceApi {
         method: "POST",
         body: JSON.stringify({ titel: "Neue Unterhaltung" }),
       }));
+    },
+
+    async transcribe(pcm: Blob, sampleRate: number, language = "de-DE"): Promise<Transcription> {
+      const form = new FormData();
+      form.set("audio", pcm, "aufnahme.pcm");
+      form.set("sample_rate", String(sampleRate));
+      form.set("sprache", language);
+      const data = record(await request<unknown>("/transkription", { method: "POST", body: form }));
+      return {
+        text: String(data.text ?? ""),
+        seconds: typeof data.dauer_s === "number" ? data.dauer_s : 0,
+        processingMs: typeof data.verarbeitung_ms === "number" ? data.verarbeitung_ms : 0,
+      };
     },
 
     async deleteConversation(conversationId: string): Promise<void> {
