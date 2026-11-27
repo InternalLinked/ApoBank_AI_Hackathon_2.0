@@ -1,0 +1,1 @@
+"""apoBank Vermittler-Copilot – Backend."""

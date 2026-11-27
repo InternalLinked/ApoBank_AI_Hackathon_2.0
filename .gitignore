@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/*.db
+data/*.db-*
+# Generierter Obsidian-Vault (Laufzeitdaten)
+vault/
+
+# Quelldaten des Hackathons nicht ins (oeffentliche) Repo
+data/*.xlsx

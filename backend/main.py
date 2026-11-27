@@ -1,0 +1,503 @@
+"""FastAPI-Backend fuer den apoBank Vermittler-Copiloten.
+
+Start:  uvicorn backend.main:app --reload
+Doku:   http://127.0.0.1:8000/docs   (OpenAPI: /openapi.json -> direkt als Tool-Definition fuer Agenten nutzbar)
+"""
+from __future__ import annotations
+
+import sqlite3
+import time
+from contextlib import asynccontextmanager
+from datetime import date
+from typing import Any, Literal
+
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
+
+from . import db, obsidian
+from .config import settings
+from .schemas import (EintragIn, GeschaeftszahlIn, SqlQueryIn, VermittlerCreate, VermittlerUpdate,
+                      ZusammenfassungIn)
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    db.init_db()
+    yield
+
+
+app = FastAPI(
+    lifespan=lifespan,
+    title="apoBank Vermittler-Copilot API",
+    version="0.1.0",
+    description=(
+        "Backend fuer einen KI-Agenten: Vermittler-Stammdaten, Kontakte, Betreuer und Geschaeftszahlen "
+        "aus SQLite abfragen und iterieren (Pagination ueber `limit`/`offset` -> `next_offset`), "
+        "Vertriebsanalysen, read-only SQL sowie ein Obsidian-'Gehirn' pro Vermittler zum Lesen und Ergaenzen "
+        "von Wissen (Gespraechsprotokolle, Notizen, Massnahmen, KI-Zusammenfassungen)."
+    ),
+)
+
+Conn = sqlite3.Connection
+
+
+@app.exception_handler(sqlite3.IntegrityError)
+def _integrity_error(_: Request, exc: sqlite3.IntegrityError) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": f"Datenbank-Konflikt: {exc}"})
+
+
+def _require(conn: Conn, vermittler_nr: int) -> dict[str, Any]:
+    v = db.get_vermittler_full(conn, vermittler_nr)
+    if v is None:
+        raise HTTPException(404, f"Vermittler {vermittler_nr} nicht gefunden")
+    return v
+
+
+def _latest_year(conn: Conn) -> int:
+    return conn.execute("SELECT COALESCE(MAX(jahr), strftime('%Y','now')) FROM geschaeftszahlen").fetchone()[0]
+
+
+def _iso(value: Any) -> Any:
+    return value.isoformat() if isinstance(value, date) else value
+
+
+# =========================================================================== Meta
+
+TABLE_DOCS = {
+    "filiale": "Filialen der apoBank mit Marktgebiet.",
+    "betreuer": "Vertriebsmitarbeiter der Bank (VPB), je einer Filiale zugeordnet.",
+    "vermittler": "Stammdaten der Vermittler (externe Handelsvertreter). PK vermittler_nr.",
+    "kontakt": "Anschrift und Kontaktdaten je Vermittler (1:1).",
+    "geschaeftszahlen": "Vermitteltes Kreditvolumen (EUR) und Anzahl Darlehen je Vermittler/Jahr/Sparte. "
+                        "Aus der Excel nur sparte='gesamt'. Das laufende Jahr ist unterjaehrig.",
+    "obsidian_eintrag": "Protokoll der ueber die API ins Obsidian-Gehirn geschriebenen Eintraege.",
+    "v_vermittler": "VIEW: Vermittler + Kontakt + Betreuer + Filiale/Marktgebiet in einer flachen Zeile.",
+}
+
+
+@app.get("/api/schema", tags=["Meta"], summary="Datenbankschema fuer den Agenten")
+def get_schema(conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    """Tabellen, Views und Spalten inkl. Beschreibung – Grundlage fuer `POST /api/sql/query`."""
+    objs = conn.execute(
+        "SELECT name, type FROM sqlite_master WHERE type IN ('table','view') "
+        "AND name NOT LIKE 'sqlite_%' ORDER BY type, name").fetchall()
+    out = []
+    for o in objs:
+        cols = conn.execute(f"PRAGMA table_info({o['name']})").fetchall()
+        out.append({
+            "name": o["name"], "typ": o["type"], "beschreibung": TABLE_DOCS.get(o["name"]),
+            "spalten": [{"name": c["name"], "typ": c["type"], "pk": bool(c["pk"])} for c in cols],
+        })
+    return {"objekte": out, "beispiel_abfragen": [
+        "SELECT marktgebiet, COUNT(*) n FROM v_vermittler WHERE status='aktiv' GROUP BY marktgebiet",
+        "SELECT v.vermittler_nr, v.name, g.volumen_eur FROM v_vermittler v JOIN geschaeftszahlen g "
+        "USING(vermittler_nr) WHERE g.jahr=2025 AND v.filiale='Filiale Hamburg' ORDER BY g.volumen_eur DESC LIMIT 10",
+    ]}
+
+
+@app.get("/api/werte", tags=["Meta"], summary="Erlaubte Filterwerte (Kategorien)")
+def get_werte(conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    """Distinkte Werte der kategorialen Felder, damit der Agent gueltige Filter waehlen kann."""
+    fields = ["marktgebiet", "filiale", "status", "vermittlertyp", "status_vertriebspartner",
+              "abrechnungskreis", "adressentyp"]
+    res: dict[str, Any] = {
+        f: [r[0] for r in conn.execute(
+            f"SELECT DISTINCT {f} FROM v_vermittler WHERE {f} IS NOT NULL ORDER BY 1").fetchall()]
+        for f in fields
+    }
+    res["jahre"] = [r[0] for r in conn.execute("SELECT DISTINCT jahr FROM geschaeftszahlen ORDER BY 1")]
+    res["sparten"] = [r[0] for r in conn.execute("SELECT DISTINCT sparte FROM geschaeftszahlen ORDER BY 1")]
+    res["eintrag_typen"] = obsidian.EINTRAG_TYPEN
+    return res
+
+
+def _ro_authorizer(action: int, *_: Any) -> int:
+    allowed = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION,
+               getattr(sqlite3, "SQLITE_RECURSIVE", 33)}
+    return sqlite3.SQLITE_OK if action in allowed else sqlite3.SQLITE_DENY
+
+
+@app.post("/api/sql/query", tags=["Meta"], summary="Read-only SQL ausfuehren")
+def sql_query(body: SqlQueryIn) -> dict[str, Any]:
+    """Fuehrt genau ein lesendes Statement (SELECT/WITH) aus. Schreibzugriffe, PRAGMA und ATTACH sind gesperrt.
+    Nutze `GET /api/schema` fuer Tabellen/Spalten."""
+    conn = db.connect(readonly=True)
+    try:
+        conn.set_authorizer(_ro_authorizer)
+        deadline = time.monotonic() + settings.sql_timeout_s
+        conn.set_progress_handler(lambda: int(time.monotonic() > deadline), 10_000)
+        try:
+            cur = conn.execute(body.sql, body.params or [])
+            rows = cur.fetchmany(body.max_rows + 1)
+        except (sqlite3.DatabaseError, sqlite3.ProgrammingError, sqlite3.Warning) as exc:
+            raise HTTPException(400, f"SQL-Fehler: {exc}") from exc
+        cols = [d[0] for d in cur.description or []]
+        truncated = len(rows) > body.max_rows
+        return {"spalten": cols, "zeilen": [list(r) for r in rows[: body.max_rows]],
+                "anzahl": min(len(rows), body.max_rows), "abgeschnitten": truncated}
+    finally:
+        conn.close()
+
+
+# =========================================================================== Stammdaten
+
+@app.get("/api/filialen", tags=["Stammdaten"])
+def list_filialen(conn: Conn = Depends(db.get_conn)) -> list[dict[str, Any]]:
+    return db.rows_to_dicts(conn.execute(
+        "SELECT f.*, (SELECT COUNT(*) FROM v_vermittler v WHERE v.filial_nr = f.filial_nr) AS anzahl_vermittler "
+        "FROM filiale f ORDER BY marktgebiet, name").fetchall())
+
+
+@app.get("/api/betreuer", tags=["Stammdaten"])
+def list_betreuer(filial_nr: int | None = None, marktgebiet: str | None = None,
+                  conn: Conn = Depends(db.get_conn)) -> list[dict[str, Any]]:
+    sql = ("SELECT b.*, f.name AS filiale, f.marktgebiet, "
+           "(SELECT COUNT(*) FROM vermittler v WHERE v.mitarbeiter_id = b.mitarbeiter_id) AS anzahl_vermittler "
+           "FROM betreuer b JOIN filiale f USING (filial_nr) WHERE 1=1")
+    params: list[Any] = []
+    if filial_nr is not None:
+        sql += " AND b.filial_nr = ?"; params.append(filial_nr)
+    if marktgebiet:
+        sql += " AND f.marktgebiet = ?"; params.append(marktgebiet)
+    return db.rows_to_dicts(conn.execute(sql + " ORDER BY f.name, b.name", params).fetchall())
+
+
+SORT_COLUMNS = {
+    "vermittler_nr": ["v.vermittler_nr"],
+    "name": ["v.name", "v.vorname"],
+    "ort": ["v.ort", "v.name"],
+    "firma": ["v.firma_filiale"],
+    "volumen": ["volumen_eur", "v.vermittler_nr"],
+    "anzahl_darlehen": ["anzahl_darlehen", "v.vermittler_nr"],
+    "betreuung_seit": ["v.betreuung_seit"],
+    "geaendert_am": ["v.geaendert_am"],
+}
+
+
+@app.get("/api/vermittler", tags=["Vermittler"], summary="Vermittler suchen, filtern und seitenweise iterieren")
+def list_vermittler(
+    q: str | None = Query(None, description="Freitext: Name, Vorname, Firma, Holding, Ort, E-Mail, Nr. "
+                                            "(mehrere Woerter = alle muessen passen)"),
+    marktgebiet: str | None = None,
+    filial_nr: int | None = None,
+    filiale: str | None = None,
+    mitarbeiter_id: str | None = Query(None, description="Betreuer-ID"),
+    betreuer: str | None = Query(None, description="Betreuer-Name (VPB)"),
+    status: Literal["aktiv", "inaktiv", "gesperrt"] | None = None,
+    vermittlertyp: str | None = None,
+    status_vertriebspartner: str | None = None,
+    abrechnungskreis: str | None = None,
+    ort: str | None = None,
+    plz: str | None = Query(None, description="PLZ-Praefix, z. B. '20' fuer Hamburg"),
+    interesse: str | None = None,
+    jahr: int | None = Query(None, description="Jahr fuer volumen_eur/anzahl_darlehen (Standard: neuestes)"),
+    min_volumen: int | None = None,
+    max_volumen: int | None = None,
+    sort: Literal[tuple(SORT_COLUMNS)] = "vermittler_nr",  # type: ignore[valid-type]
+    order: Literal["asc", "desc"] = "asc",
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    conn: Conn = Depends(db.get_conn),
+) -> dict[str, Any]:
+    """Liefert eine Seite kompakter Vermittler-Datensaetze. Zum vollstaendigen Iterieren solange mit
+    `offset = next_offset` erneut aufrufen, bis `next_offset` null ist."""
+    jahr = jahr or _latest_year(conn)
+    where, params = ["1=1"], []
+    if q:
+        for token in q.split():
+            like = f"%{token}%"
+            where.append("(v.name LIKE ? OR v.vorname LIKE ? OR v.firma_filiale LIKE ? OR v.firma_holding LIKE ? "
+                         "OR v.ort LIKE ? OR v.email LIKE ? OR CAST(v.vermittler_nr AS TEXT) = ?)")
+            params += [like] * 6 + [token]
+    exact = {"v.marktgebiet": marktgebiet, "v.filial_nr": filial_nr, "v.filiale": filiale,
+             "v.mitarbeiter_id": mitarbeiter_id, "v.betreuer_name": betreuer, "v.status": status,
+             "v.vermittlertyp": vermittlertyp, "v.status_vertriebspartner": status_vertriebspartner,
+             "v.abrechnungskreis": abrechnungskreis, "v.ort": ort}
+    for col, val in exact.items():
+        if val is not None:
+            where.append(f"{col} = ? COLLATE NOCASE"); params.append(val)
+    if plz:
+        where.append("v.plz LIKE ?"); params.append(f"{plz}%")
+    if interesse:
+        where.append("v.interessen LIKE ?"); params.append(f"%{interesse}%")
+    if min_volumen is not None:
+        where.append("COALESCE(g.volumen_eur, 0) >= ?"); params.append(min_volumen)
+    if max_volumen is not None:
+        where.append("COALESCE(g.volumen_eur, 0) <= ?"); params.append(max_volumen)
+
+    base = (
+        "FROM v_vermittler v LEFT JOIN (SELECT vermittler_nr, SUM(volumen_eur) AS volumen_eur, "
+        "SUM(anzahl_darlehen) AS anzahl_darlehen FROM geschaeftszahlen WHERE jahr = ? AND sparte = 'gesamt' "
+        "GROUP BY vermittler_nr) g ON g.vermittler_nr = v.vermittler_nr WHERE " + " AND ".join(where)
+    )
+    all_params = [jahr] + params
+    total = conn.execute(f"SELECT COUNT(*) {base}", all_params).fetchone()[0]
+    order_sql = ", ".join(f"{c} {order.upper()}" for c in SORT_COLUMNS[sort])
+    rows = conn.execute(
+        "SELECT v.vermittler_nr, v.titel, v.vorname, v.name, v.firma_filiale, v.vermittlertyp, v.status, "
+        "v.status_vertriebspartner, v.abrechnungskreis, v.plz, v.ort, v.email, v.telefon_dienst, "
+        "v.mitarbeiter_id, v.betreuer_name, v.filial_nr, v.filiale, v.marktgebiet, v.obsidian_pfad, "
+        "COALESCE(g.volumen_eur, 0) AS volumen_eur, COALESCE(g.anzahl_darlehen, 0) AS anzahl_darlehen "
+        f"{base} ORDER BY {order_sql} LIMIT ? OFFSET ?", all_params + [limit, offset]).fetchall()
+    next_offset = offset + limit if offset + limit < total else None
+    return {"total": total, "limit": limit, "offset": offset, "next_offset": next_offset,
+            "jahr_kennzahlen": jahr, "items": db.rows_to_dicts(rows)}
+
+
+@app.get("/api/vermittler/{vermittler_nr}", tags=["Vermittler"], summary="Vollstaendiges Vermittlerprofil")
+def get_vermittler(vermittler_nr: int, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    return _require(conn, vermittler_nr)
+
+
+@app.get("/api/vermittler/{vermittler_nr}/kontext", tags=["Vermittler"],
+         summary="Profil + Obsidian-Gehirn als ein Kontextpaket fuer KI-Zusammenfassungen")
+def get_kontext(vermittler_nr: int, limit_eintraege: int | None = Query(None, ge=1),
+                conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    v = _require(conn, vermittler_nr)
+    brain = obsidian.read_brain(vermittler_nr, limit=limit_eintraege)
+    return {"profil": v, "zusammenfassung": brain["zusammenfassung"],
+            "eintraege": [{"datei": e["datei"], **e["frontmatter"], "inhalt": e["inhalt"]} for e in brain["eintraege"]],
+            "kontext_text": obsidian.brain_as_text(brain)}
+
+
+def _write_kontakt(conn: Conn, nr: int, kontakt: dict[str, Any]) -> None:
+    if not kontakt:
+        return
+    cols = list(kontakt)
+    conn.execute(
+        f"INSERT INTO kontakt (vermittler_nr, {', '.join(cols)}) VALUES (?, {', '.join('?' * len(cols))}) "
+        f"ON CONFLICT(vermittler_nr) DO UPDATE SET {', '.join(f'{c} = excluded.{c}' for c in cols)}",
+        [nr] + [kontakt[c] for c in cols])
+
+
+def _vermittler_fields(data: dict[str, Any]) -> dict[str, Any]:
+    out = {k: _iso(v) for k, v in data.items() if k != "kontakt"}
+    if "interessen" in out and isinstance(out["interessen"], list):
+        out["interessen"] = ", ".join(out["interessen"]) or None
+    return out
+
+
+@app.post("/api/vermittler", tags=["Vermittler"], status_code=201, summary="Neuen Vermittler anlegen")
+def create_vermittler(body: VermittlerCreate, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    """Legt Stammdaten (+ optional Kontakt) an und erzeugt automatisch das Obsidian-Gehirn."""
+    data = _vermittler_fields(body.model_dump(exclude_none=True))
+    nr = data.get("vermittler_nr") or conn.execute(
+        "SELECT COALESCE(MAX(vermittler_nr), 0) + 1 FROM vermittler").fetchone()[0]
+    if conn.execute("SELECT 1 FROM vermittler WHERE vermittler_nr = ?", (nr,)).fetchone():
+        raise HTTPException(409, f"Vermittler {nr} existiert bereits")
+    if data.get("mitarbeiter_id") and not conn.execute(
+            "SELECT 1 FROM betreuer WHERE mitarbeiter_id = ?", (data["mitarbeiter_id"],)).fetchone():
+        raise HTTPException(422, f"Betreuer {data['mitarbeiter_id']} unbekannt (siehe GET /api/betreuer)")
+    ref = obsidian.reference(nr)
+    data.update(vermittler_nr=nr, obsidian_pfad=ref["pfad"], obsidian_uri=ref["uri"])
+    conn.execute(f"INSERT INTO vermittler ({', '.join(data)}) VALUES ({', '.join('?' * len(data))})",
+                 list(data.values()))
+    if body.kontakt:
+        _write_kontakt(conn, nr, body.kontakt.model_dump(exclude_none=True))
+    v = _require(conn, nr)
+    obsidian.sync_hub(v)
+    return v
+
+
+@app.patch("/api/vermittler/{vermittler_nr}", tags=["Vermittler"], summary="Vermittler aendern (Teilupdate)")
+def update_vermittler(vermittler_nr: int, body: VermittlerUpdate,
+                      conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    _require(conn, vermittler_nr)
+    data = _vermittler_fields(body.model_dump(exclude_unset=True))
+    if data:
+        sets = ", ".join(f"{k} = ?" for k in data)
+        conn.execute(f"UPDATE vermittler SET {sets}, geaendert_am = datetime('now') WHERE vermittler_nr = ?",
+                     list(data.values()) + [vermittler_nr])
+    if body.kontakt is not None:
+        _write_kontakt(conn, vermittler_nr, body.kontakt.model_dump(exclude_unset=True))
+    v = _require(conn, vermittler_nr)
+    obsidian.sync_hub(v)
+    return v
+
+
+@app.get("/api/vermittler/{vermittler_nr}/geschaeftszahlen", tags=["Geschaeftszahlen"])
+def get_geschaeftszahlen(vermittler_nr: int, conn: Conn = Depends(db.get_conn)) -> list[dict[str, Any]]:
+    return _require(conn, vermittler_nr)["geschaeftszahlen"]
+
+
+@app.put("/api/vermittler/{vermittler_nr}/geschaeftszahlen/{jahr}", tags=["Geschaeftszahlen"],
+         summary="Geschaeftszahlen eines Jahres setzen (Upsert)")
+def put_geschaeftszahlen(vermittler_nr: int, jahr: int, body: GeschaeftszahlIn,
+                         conn: Conn = Depends(db.get_conn)) -> list[dict[str, Any]]:
+    _require(conn, vermittler_nr)
+    conn.execute(
+        "INSERT INTO geschaeftszahlen (vermittler_nr, jahr, sparte, volumen_eur, anzahl_darlehen) "
+        "VALUES (?, ?, ?, ?, ?) ON CONFLICT(vermittler_nr, jahr, sparte) DO UPDATE SET "
+        "volumen_eur = excluded.volumen_eur, anzahl_darlehen = excluded.anzahl_darlehen",
+        (vermittler_nr, jahr, body.sparte, body.volumen_eur, body.anzahl_darlehen))
+    v = _require(conn, vermittler_nr)
+    obsidian.sync_hub(v)
+    return v["geschaeftszahlen"]
+
+
+# =========================================================================== Analysen
+
+GRUPPEN = {
+    "vermittler": ("v.vermittler_nr", "v.vermittler_nr, v.titel, v.vorname, v.name, v.firma_filiale, "
+                                      "v.filiale, v.marktgebiet, v.betreuer_name"),
+    "filiale": ("v.filial_nr", "v.filial_nr, v.filiale, v.marktgebiet"),
+    "marktgebiet": ("v.marktgebiet", "v.marktgebiet"),
+    "betreuer": ("v.mitarbeiter_id", "v.mitarbeiter_id, v.betreuer_name, v.filiale"),
+    "vermittlertyp": ("v.vermittlertyp", "v.vermittlertyp"),
+    "status_vertriebspartner": ("v.status_vertriebspartner", "v.status_vertriebspartner"),
+    "abrechnungskreis": ("v.abrechnungskreis", "v.abrechnungskreis"),
+}
+Gruppe = Literal[tuple(GRUPPEN)]  # type: ignore[valid-type]
+
+
+def _analytics_filter(marktgebiet: str | None, filial_nr: int | None, mitarbeiter_id: str | None,
+                      status: str | None) -> tuple[str, list[Any]]:
+    where, params = [], []
+    for col, val in (("v.marktgebiet", marktgebiet), ("v.filial_nr", filial_nr),
+                     ("v.mitarbeiter_id", mitarbeiter_id), ("v.status", status)):
+        if val is not None:
+            where.append(f"{col} = ? COLLATE NOCASE"); params.append(val)
+    return (" AND " + " AND ".join(where)) if where else "", params
+
+
+@app.get("/api/analytics/ranking", tags=["Analysen"], summary="Ranking nach Kreditvolumen")
+def ranking(gruppe: Gruppe = "vermittler", jahr: int | None = None,  # type: ignore[valid-type]
+            marktgebiet: str | None = None, filial_nr: int | None = None, mitarbeiter_id: str | None = None,
+            status: str | None = None, limit: int = Query(10, ge=1, le=500),
+            conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    """z. B. 'beste Vermittler einer Region': `gruppe=vermittler&marktgebiet=Nord&jahr=2025`."""
+    jahr = jahr or _latest_year(conn)
+    key, select = GRUPPEN[gruppe]
+    flt, params = _analytics_filter(marktgebiet, filial_nr, mitarbeiter_id, status)
+    rows = conn.execute(
+        f"SELECT {select}, COUNT(DISTINCT v.vermittler_nr) AS anzahl_vermittler, "
+        "SUM(g.volumen_eur) AS volumen_eur, SUM(g.anzahl_darlehen) AS anzahl_darlehen, "
+        "ROUND(1.0 * SUM(g.volumen_eur) / MAX(SUM(g.anzahl_darlehen), 1)) AS volumen_je_darlehen "
+        "FROM v_vermittler v JOIN geschaeftszahlen g ON g.vermittler_nr = v.vermittler_nr "
+        f"AND g.jahr = ? AND g.sparte = 'gesamt' WHERE 1=1 {flt} "
+        f"GROUP BY {key} ORDER BY volumen_eur DESC LIMIT ?", [jahr] + params + [limit]).fetchall()
+    return {"jahr": jahr, "gruppe": gruppe, "items": db.rows_to_dicts(rows)}
+
+
+@app.get("/api/analytics/wachstum", tags=["Analysen"], summary="Volumenwachstum zwischen zwei Jahren")
+def wachstum(von_jahr: int, bis_jahr: int, gruppe: Gruppe = "vermittler",  # type: ignore[valid-type]
+             marktgebiet: str | None = None, filial_nr: int | None = None, mitarbeiter_id: str | None = None,
+             status: str | None = None, sortierung: Literal["absolut", "prozent"] = "absolut",
+             min_basis_eur: int = Query(0, ge=0, description="Mindestvolumen im Basisjahr (gegen Prozent-Ausreisser)"),
+             richtung: Literal["desc", "asc"] = "desc", limit: int = Query(10, ge=1, le=500),
+             conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    """z. B. 'staerkstes Volumenwachstum': `von_jahr=2024&bis_jahr=2025&sortierung=prozent&min_basis_eur=500000`."""
+    key, select = GRUPPEN[gruppe]
+    flt, params = _analytics_filter(marktgebiet, filial_nr, mitarbeiter_id, status)
+    order_col = "delta_eur" if sortierung == "absolut" else "wachstum_pct"
+    rows = conn.execute(
+        f"SELECT {select}, "
+        "SUM(CASE WHEN g.jahr = ? THEN g.volumen_eur ELSE 0 END) AS volumen_von, "
+        "SUM(CASE WHEN g.jahr = ? THEN g.volumen_eur ELSE 0 END) AS volumen_bis "
+        "FROM v_vermittler v JOIN geschaeftszahlen g ON g.vermittler_nr = v.vermittler_nr "
+        f"AND g.jahr IN (?, ?) AND g.sparte = 'gesamt' WHERE 1=1 {flt} GROUP BY {key}",
+        [von_jahr, bis_jahr, von_jahr, bis_jahr] + params).fetchall()
+    items = []
+    for r in rows:
+        d = dict(r)
+        if d["volumen_von"] < min_basis_eur:
+            continue
+        d["delta_eur"] = d["volumen_bis"] - d["volumen_von"]
+        d["wachstum_pct"] = round(100 * d["delta_eur"] / d["volumen_von"], 1) if d["volumen_von"] else None
+        items.append(d)
+    valid = sorted((d for d in items if d[order_col] is not None), key=lambda d: d[order_col],
+                   reverse=(richtung == "desc"))
+    items = valid + [d for d in items if d[order_col] is None]  # ohne Basisvolumen ans Ende
+    return {"von_jahr": von_jahr, "bis_jahr": bis_jahr, "gruppe": gruppe, "sortierung": sortierung,
+            "items": items[:limit]}
+
+
+@app.get("/api/analytics/ueberblick", tags=["Analysen"], summary="Portfolio-Kennzahlen")
+def ueberblick(marktgebiet: str | None = None, filial_nr: int | None = None, mitarbeiter_id: str | None = None,
+               conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    flt, params = _analytics_filter(marktgebiet, filial_nr, mitarbeiter_id, None)
+    per_jahr = conn.execute(
+        "SELECT g.jahr, SUM(g.volumen_eur) AS volumen_eur, SUM(g.anzahl_darlehen) AS anzahl_darlehen, "
+        "SUM(g.volumen_eur > 0) AS aktive_vermittler FROM v_vermittler v JOIN geschaeftszahlen g "
+        f"ON g.vermittler_nr = v.vermittler_nr AND g.sparte = 'gesamt' WHERE 1=1 {flt} "
+        "GROUP BY g.jahr ORDER BY g.jahr", params).fetchall()
+
+    def count_by(col: str) -> dict[str, int]:
+        return {r[0]: r[1] for r in conn.execute(
+            f"SELECT {col}, COUNT(*) FROM v_vermittler v WHERE 1=1 {flt} GROUP BY 1 ORDER BY 2 DESC", params)}
+
+    return {
+        "anzahl_vermittler": conn.execute(f"SELECT COUNT(*) FROM v_vermittler v WHERE 1=1 {flt}", params).fetchone()[0],
+        "kennzahlen_je_jahr": db.rows_to_dicts(per_jahr),
+        "nach_status": count_by("v.status"),
+        "nach_status_vertriebspartner": count_by("v.status_vertriebspartner"),
+        "nach_vermittlertyp": count_by("v.vermittlertyp"),
+        "nach_marktgebiet": count_by("v.marktgebiet"),
+    }
+
+
+# =========================================================================== Obsidian-Gehirn
+
+@app.get("/api/vermittler/{vermittler_nr}/obsidian", tags=["Obsidian"], summary="Obsidian-Referenz + Eintragsliste")
+def get_obsidian(vermittler_nr: int, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    v = _require(conn, vermittler_nr)
+    return {**obsidian.reference(vermittler_nr), "vault": str(settings.vault_path),
+            "eintraege": [{"datei": e["datei"], **e["frontmatter"]} for e in obsidian.list_entries(vermittler_nr)],
+            "anzeigename": v["anzeigename"]}
+
+
+@app.get("/api/vermittler/{vermittler_nr}/obsidian/inhalt", tags=["Obsidian"],
+         summary="Gesamtes Gehirn lesen (Hub + Eintraege)")
+def get_obsidian_inhalt(vermittler_nr: int, limit: int | None = Query(None, ge=1),
+                        seit: date | None = Query(None, description="Nur Eintraege ab diesem Datum"),
+                        format: Literal["json", "text"] = "json", conn: Conn = Depends(db.get_conn)) -> Any:
+    """`format=text` liefert ein einzelnes Markdown-Dokument – ideal als LLM-Kontext zum Zusammenfassen."""
+    _require(conn, vermittler_nr)
+    brain = obsidian.read_brain(vermittler_nr, limit=limit, seit=seit)
+    if format == "text":
+        return PlainTextResponse(obsidian.brain_as_text(brain), media_type="text/markdown; charset=utf-8")
+    return brain
+
+
+@app.post("/api/vermittler/{vermittler_nr}/obsidian/eintraege", tags=["Obsidian"], status_code=201,
+          summary="Information zum Obsidian-Gehirn hinzufuegen")
+def add_obsidian_eintrag(vermittler_nr: int, body: EintragIn, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    """Legt eine neue Notiz (Gespraechsprotokoll, Telefonat, Notiz, Massnahme, ...) im Ordner des Vermittlers an,
+    verlinkt sie in der Hub-Notiz und protokolliert sie in der Tabelle `obsidian_eintrag`.
+    Massnahmen werden als Obsidian-Tasks (`- [ ]`) geschrieben."""
+    v = _require(conn, vermittler_nr)
+    res = obsidian.add_entry(v, body.model_dump())
+    cur = conn.execute(
+        "INSERT INTO obsidian_eintrag (vermittler_nr, typ, titel, datum, datei, autor, quelle) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (vermittler_nr, res["typ"], res["titel"], res["datum"], res["datei"], body.autor, body.quelle))
+    return {"id": cur.lastrowid, "vermittler_nr": vermittler_nr, **res}
+
+
+@app.put("/api/vermittler/{vermittler_nr}/obsidian/zusammenfassung", tags=["Obsidian"],
+         summary="KI-Zusammenfassung in die Hub-Notiz schreiben")
+def put_zusammenfassung(vermittler_nr: int, body: ZusammenfassungIn,
+                        conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    v = _require(conn, vermittler_nr)
+    if not obsidian.abs_path(obsidian.hub_rel(vermittler_nr)).exists():
+        obsidian.sync_hub(v)
+    obsidian.set_summary(vermittler_nr, body.text, body.quelle)
+    return {**obsidian.reference(vermittler_nr), "zusammenfassung": obsidian.read_brain(vermittler_nr)["zusammenfassung"]}
+
+
+@app.post("/api/vermittler/{vermittler_nr}/obsidian/sync", tags=["Obsidian"],
+          summary="Hub-Notiz aus der Datenbank neu aufbauen")
+def sync_obsidian(vermittler_nr: int, conn: Conn = Depends(db.get_conn)) -> dict[str, str]:
+    return obsidian.sync_hub(_require(conn, vermittler_nr))
+
+
+@app.post("/api/obsidian/sync", tags=["Obsidian"], summary="Alle Hub-Notizen neu synchronisieren")
+def sync_obsidian_all(conn: Conn = Depends(db.get_conn)) -> dict[str, int]:
+    nrs = [r[0] for r in conn.execute("SELECT vermittler_nr FROM vermittler ORDER BY 1")]
+    for nr in nrs:
+        obsidian.sync_hub(db.get_vermittler_full(conn, nr))
+    return {"synchronisiert": len(nrs)}
+
+
+@app.get("/api/obsidian/suche", tags=["Obsidian"], summary="Volltextsuche ueber alle Vermittler-Notizen")
+def search_obsidian(q: str = Query(min_length=2), limit: int = Query(20, ge=1, le=200)) -> list[dict[str, Any]]:
+    return obsidian.search(q, limit)
