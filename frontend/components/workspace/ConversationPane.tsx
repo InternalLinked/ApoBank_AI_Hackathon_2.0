@@ -28,6 +28,8 @@ type ConversationPaneProps = {
   /** Rechte Leiste ist eingefahren (Desktop): Button zum Einblenden zeigen. */
   inspectorCollapsed: boolean;
   onExpandInspector: () => void;
+  /** Avatar-Knopf oben rechts: Partnerakte ein-/ausblenden. */
+  onToggleInspector: () => void;
   onSelectCandidate: (candidate: PartnerCandidate) => void;
   /** Klick auf einen verlinkten Vermittlernamen im Antworttext. */
   onOpenPartner: (vermittlerNr: number, name: string) => void;
@@ -35,7 +37,7 @@ type ConversationPaneProps = {
   onError: (message: string) => void;
 };
 
-export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, onOpenDetails, inspectorCollapsed, onExpandInspector, onSelectCandidate, onOpenPartner, onTranscribe, onError }: ConversationPaneProps) {
+export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, onOpenDetails, inspectorCollapsed, onExpandInspector, onToggleInspector, onSelectCandidate, onOpenPartner, onTranscribe, onError }: ConversationPaneProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -89,7 +91,9 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
           <span className={`prototype-pill ${aiConfigured ? "is-ready" : ""}`}><span /> {aiConfigured ? "KI verbunden" : "KI-Key fehlt"}</span>
           <button className="icon-button mobile-trigger" aria-label="Partnerakte öffnen" onClick={onOpenDetails}><Icon name="panel" /></button>
           {inspectorCollapsed && <button className="icon-button panel-expand" type="button" aria-label="Partnerakte-Leiste einblenden" title="Partnerakte-Leiste einblenden" onClick={onExpandInspector}><Icon name="panel" /></button>}
-          <button className="topbar-avatar" aria-label={`Partnerakte ${partner?.name ?? "öffnen"}`}>{partner?.name.split(" ").map((part) => part[0]).join("").slice(0, 2) ?? "PC"}</button>
+          <button className="topbar-avatar" type="button" onClick={onToggleInspector}
+            aria-label={inspectorCollapsed ? `Partnerakte ${partner?.name ? `von ${partner.name} ` : ""}öffnen` : "Partnerakte einfahren"}
+            title={inspectorCollapsed ? "Partnerakte öffnen" : "Partnerakte einfahren"}>{partner?.name.split(" ").map((part) => part[0]).join("").slice(0, 2) ?? "PC"}</button>
         </div>
       </header>
 
