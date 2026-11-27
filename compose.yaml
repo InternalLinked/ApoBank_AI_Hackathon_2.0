@@ -1,0 +1,14 @@
+services:
+  apobank-copilot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: apobank-copilot:local
+    ports:
+      - "127.0.0.1:18080:80"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+    volumes:
+      - ./data:/app/data
+      - ./vault:/app/vault

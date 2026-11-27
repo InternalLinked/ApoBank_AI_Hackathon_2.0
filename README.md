@@ -127,3 +127,15 @@ Der Copilot nutzt die OpenAI Responses API mit ausschließlich lesenden Werkzeug
 ### AWS / Deployment
 
 `Dockerfile` baut das Next.js-Frontend und startet FastAPI auf Port 80. `buildspec.yml` kann dieses Image wie bisher in ECR veröffentlichen. Für ECS müssen `/app/data` und `/app/vault` persistent gemountet werden, zum Beispiel über EFS; SQLite und hochgeladene Dokumente gehen sonst bei einem Task-Neustart verloren. Schlüssel wie `OPENAI_API_KEY` gehören in ECS Secrets oder Parameter Store, nie in GitHub oder das Docker-Image.
+
+### Lokal mit Docker
+
+Für die gemeinsame lokale Vorschau verwende `docker compose up --build`. Die Compose-Konfiguration bindet `./data` und `./vault` persistent in den Container ein. Liegt beim ersten Start eine Quelldatei unter `data/Musterliste_apoBank.xlsx`, wird sie automatisch in `data/apobank.db` importiert. Eine vorhandene `data/apobank.db` hat immer Vorrang und wird nicht überschrieben.
+
+Wird die Excel-Datei erst nach dem ersten Start bereitgestellt, importiert sie ein Teammitglied bewusst mit:
+
+```bash
+docker compose exec apobank-copilot python -m backend.import_excel --excel /app/data/Musterliste_apoBank.xlsx --reset
+```
+
+Die Quelldatei und die erzeugte SQLite-Datenbank bleiben aufgrund ihrer Sensibilität außerhalb von Git.
