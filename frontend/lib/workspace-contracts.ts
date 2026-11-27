@@ -47,6 +47,20 @@ export type PartnerSummary = {
   status: string;
 };
 
+export type PartnerDetail = PartnerSummary & {
+  email: string;
+  phone: string;
+  location: string;
+  branch: string;
+  marketArea: string;
+  interests: string[];
+  businessFigures: Array<{
+    year: number;
+    volume: number;
+    loanCount: number;
+  }>;
+};
+
 export type WorkspaceSnapshot = {
   conversations: Conversation[];
   messagesByConversation: Record<string, ChatMessage[]>;
@@ -67,7 +81,10 @@ export type ManualEntryInput =
       kind: "note";
       partnerName: string;
       date: string;
+      title: string;
       content: string;
+      participants: string;
+      nextSteps: string;
       fileName?: string;
       file?: File | null;
       vermittlerNr?: number;
@@ -93,6 +110,7 @@ export interface WorkspaceApi {
   createConversation(): Promise<Conversation>;
   deleteConversation(conversationId: string): Promise<void>;
   sendMessage(conversationId: string, content: string): Promise<ChatReply>;
+  getPartnerDetail(vermittlerNr: number): Promise<PartnerDetail>;
   createEntry(input: ManualEntryInput): Promise<SavedEntry>;
   confirmFindings(conversationId: string, partner: PartnerSummary, findings: ExtractedFinding[]): Promise<void>;
 }

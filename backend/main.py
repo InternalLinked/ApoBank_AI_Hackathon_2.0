@@ -184,8 +184,12 @@ def _chat_konversation(conn: Conn, conversation_id: str) -> dict[str, Any]:
 
 
 @app.get("/api/health", tags=["Meta"], summary="Laufzeitstatus fuer die Weboberflaeche")
-def health() -> dict[str, Any]:
-    return {"status": "ok", "openai_configured": bool(settings.openai_api_key)}
+def health(conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "openai_configured": bool(settings.openai_api_key),
+        "vermittler_count": conn.execute("SELECT COUNT(*) FROM vermittler").fetchone()[0],
+    }
 
 
 # =========================================================================== Meta
@@ -607,6 +611,17 @@ def get_chat_workspace(client: str = Depends(client_id), conn: Conn = Depends(db
 @app.post("/api/chat/conversations", tags=["Chat"], status_code=201, summary="Neuen Chat anlegen")
 def create_chat_conversation(body: ChatKonversationCreate, client: str = Depends(client_id),
                              conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    # Mehrfaches Klicken auf "Neuer Chat" darf keine Liste leerer Unterhaltungen erzeugen.
+    empty_conversation = conn.execute(
+        "SELECT c.id, c.titel, c.vermittler_nr, c.aktualisiert_am, 'Noch keine Nachrichten' AS vorschau "
+        "FROM chat_konversation c WHERE NOT EXISTS ("
+        "SELECT 1 FROM chat_nachricht m WHERE m.konversation_id = c.id"
+        ") AND c.client_id = ? AND ? = 'Neue Unterhaltung' ORDER BY c.aktualisiert_am DESC, c.erstellt_am DESC LIMIT 1",
+        (client, body.titel.strip()),
+    ).fetchone()
+    if empty_conversation is not None:
+        return dict(empty_conversation)
+
     conversation_id = str(uuid4())
     conn.execute("INSERT INTO chat_konversation (id, titel, client_id) VALUES (?, ?, ?)",
                  (conversation_id, body.titel.strip(), client))
@@ -712,6 +727,8 @@ async def add_document(
     titel: str | None = Form(None),
     inhalt: str | None = Form(None),
     datum: date | None = Form(None),
+    teilnehmer: str | None = Form(None),
+    massnahmen: str | None = Form(None),
     conn: Conn = Depends(db.get_conn),
 ) -> dict[str, Any]:
     """Legt einen Anhang lokal ab und verlinkt ihn aus einem Obsidian-Dokumenteintrag."""
@@ -737,8 +754,8 @@ async def add_document(
         "titel": (titel or original_name).strip(),
         "inhalt": note_text,
         "datum": datum,
-        "teilnehmer": [],
-        "massnahmen": [],
+        "teilnehmer": [name.strip() for name in (teilnehmer or "").split(",") if name.strip()],
+        "massnahmen": [{"beschreibung": step.strip()} for step in (massnahmen or "").splitlines() if step.strip()],
         "tags": ["upload"],
         "autor": "ui",
         "quelle": "upload",
@@ -786,5 +803,10 @@ def search_obsidian(q: str = Query(min_length=2), limit: int = Query(20, ge=1, l
 # ueber FastAPI aus. Lokal bleibt `npm run dev` moeglich; die API wird dabei per
 # Next.js-Rewrite auf Port 8000 weitergeleitet.
 _frontend_out = Path(__file__).resolve().parent.parent / "frontend" / "out"
+try:
+    from .copilot.router import router as copilot_router
+    app.include_router(copilot_router)
+except ImportError:
+    logger.warning("Der optionale Team-Copilot-Router ist nicht verfügbar.")
 if _frontend_out.is_dir():
     app.mount("/", StaticFiles(directory=str(_frontend_out), html=True), name="frontend")

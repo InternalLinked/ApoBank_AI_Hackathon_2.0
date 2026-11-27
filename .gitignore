@@ -1,9 +1,12 @@
 .venv/
+.env
 __pycache__/
 *.pyc
 .pytest_cache/
 data/*.db
 data/*.db-*
+# Hochgeladene Laufzeitdokumente
+data/uploads/
 # Generierter Obsidian-Vault (Laufzeitdaten)
 vault/
 

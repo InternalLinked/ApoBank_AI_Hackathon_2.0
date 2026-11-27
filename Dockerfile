@@ -19,6 +19,8 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY backend ./backend
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint
+RUN chmod +x /usr/local/bin/docker-entrypoint
 COPY --from=frontend-build /frontend/out ./frontend/out
 
 # SQLite, Obsidian-Vault und Uploads muessen bei ECS ausserhalb des Containers
@@ -26,4 +28,5 @@ COPY --from=frontend-build /frontend/out ./frontend/out
 VOLUME ["/app/data", "/app/vault"]
 EXPOSE 80
 
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint"]
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "80"]

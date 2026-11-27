@@ -4,6 +4,7 @@ import type {
   Conversation,
   ExtractedFinding,
   ManualEntryInput,
+  PartnerDetail,
   PartnerSummary,
   SavedEntry,
   WorkspaceApi,
@@ -221,6 +222,10 @@ function toConversation(value: unknown): Conversation {
   };
 }
 
+function isEmptyConversation(conversation: Conversation): boolean {
+  return conversation.title === "Neue Unterhaltung" && conversation.preview === "Noch keine Nachrichten";
+}
+
 function toPartnerFromProfile(value: unknown): PartnerSummary | null {
   const item = record(value);
   const nr = item.vermittler_nr;
@@ -235,10 +240,41 @@ function toPartnerFromProfile(value: unknown): PartnerSummary | null {
   };
 }
 
+function toPartnerDetail(value: unknown): PartnerDetail | null {
+  const item = record(value);
+  const summary = toPartnerFromProfile(item);
+  if (!summary) return null;
+  const contact = record(item.kontakt);
+  const betreuung = record(item.betreuung);
+  const figures = Array.isArray(item.geschaeftszahlen) ? item.geschaeftszahlen.map(record) : [];
+  return {
+    ...summary,
+    email: String(contact.email ?? ""),
+    phone: String(contact.telefon_dienst ?? contact.handy_dienst ?? ""),
+    location: [contact.plz, contact.ort].filter(Boolean).join(" "),
+    branch: String(betreuung.filiale ?? ""),
+    marketArea: String(betreuung.marktgebiet ?? ""),
+    interests: Array.isArray(item.interessen) ? item.interessen.map(String) : [],
+    businessFigures: figures.map((figure) => ({
+      year: Number(figure.jahr ?? 0),
+      volume: Number(figure.volumen_eur ?? 0),
+      loanCount: Number(figure.anzahl_darlehen ?? 0),
+    })).filter((figure) => figure.year > 0),
+  };
+}
+
 function splitName(fullName: string): { vorname: string; name: string } {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
   if (parts.length < 2) throw new Error("Bitte Vor- und Nachname eingeben.");
   return { vorname: parts.slice(0, -1).join(" "), name: parts[parts.length - 1] ?? "" };
+}
+
+function toParticipants(value: string): string[] {
+  return value.split(",").map((participant) => participant.trim()).filter(Boolean);
+}
+
+function toNextSteps(value: string): Array<{ beschreibung: string }> {
+  return value.split("\n").map((step) => step.trim()).filter(Boolean).map((beschreibung) => ({ beschreibung }));
 }
 
 async function resolvePartner(input: Extract<ManualEntryInput, { kind: "note" }>): Promise<PartnerSummary> {
@@ -265,7 +301,14 @@ export function createWorkspaceApi(): WorkspaceApi {
   return {
     async loadWorkspace(): Promise<WorkspaceSnapshot> {
       const data = record(await request<unknown>("/chat/workspace"));
-      const conversations = Array.isArray(data.conversations) ? data.conversations.map(toConversation) : [];
+      const allConversations = Array.isArray(data.conversations) ? data.conversations.map(toConversation) : [];
+      let emptyConversationShown = false;
+      const conversations = allConversations.filter((conversation) => {
+        if (!isEmptyConversation(conversation)) return true;
+        if (emptyConversationShown) return false;
+        emptyConversationShown = true;
+        return true;
+      });
       const rawMessages = record(data.messages_by_conversation);
       const messagesByConversation = Object.fromEntries(conversations.map((conversation) => {
         const rawConversationMessages = rawMessages[conversation.id];
@@ -318,6 +361,12 @@ export function createWorkspaceApi(): WorkspaceApi {
       };
     },
 
+    async getPartnerDetail(vermittlerNr: number): Promise<PartnerDetail> {
+      const detail = toPartnerDetail(await request<unknown>(`/vermittler/${vermittlerNr}`));
+      if (!detail) throw new Error("Partnerakte konnte nicht geladen werden.");
+      return detail;
+    },
+
     async createEntry(input: ManualEntryInput): Promise<SavedEntry> {
       if (input.kind === "partner") {
         const name = splitName(input.name);
@@ -335,21 +384,27 @@ export function createWorkspaceApi(): WorkspaceApi {
       }
 
       const partner = await resolvePartner(input);
+      const teilnehmer = toParticipants(input.participants);
+      const massnahmen = toNextSteps(input.nextSteps);
       if (input.file) {
         const form = new FormData();
         form.set("file", input.file);
-        form.set("titel", input.file.name);
+        form.set("titel", input.title);
         form.set("inhalt", input.content);
         form.set("datum", input.date);
+        form.set("teilnehmer", teilnehmer.join(","));
+        form.set("massnahmen", massnahmen.map((step) => step.beschreibung).join("\n"));
         await request(`/vermittler/${partner.vermittlerNr}/dokumente`, { method: "POST", body: form });
       } else {
         await request(`/vermittler/${partner.vermittlerNr}/obsidian/eintraege`, {
           method: "POST",
           body: JSON.stringify({
             typ: "gespraech",
-            titel: "Gesprächsnotiz",
+            titel: input.title,
             inhalt: input.content,
             datum: input.date,
+            teilnehmer,
+            massnahmen,
             quelle: "manuell",
             autor: "ui",
           }),

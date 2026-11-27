@@ -1,10 +1,10 @@
 import { FormEvent, useState } from "react";
-import type { ExtractedFinding, ManualEntryInput, PartnerSummary } from "@/lib/workspace-contracts";
-import { errorMessage } from "@/lib/workspace-api";
+import type { ExtractedFinding, ManualEntryInput, PartnerDetail, PartnerSummary } from "@/lib/workspace-contracts";
 import { Icon } from "./Icons";
 
 type InspectorPanelProps = {
   partner: PartnerSummary | null;
+  partnerDetail: PartnerDetail | null;
   findings: ExtractedFinding[];
   mobileOpen: boolean;
   onCloseMobile: () => void;
@@ -12,35 +12,46 @@ type InspectorPanelProps = {
   onConfirmFindings: (findingIds: string[]) => void;
 };
 
-export function InspectorPanel({ partner, findings, mobileOpen, onCloseMobile, onSaveEntry, onConfirmFindings }: InspectorPanelProps) {
+export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, onCloseMobile, onSaveEntry, onConfirmFindings }: InspectorPanelProps) {
   const today = new Date().toISOString().slice(0, 10);
-  const [activeTab, setActiveTab] = useState<"findings" | "manual">("findings");
+  const [addOpen, setAddOpen] = useState(false);
   const [entryKind, setEntryKind] = useState<"partner" | "note">("partner");
   const [fileName, setFileName] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
-  const [success, setSuccess] = useState("");
-  const [isError, setIsError] = useState(false);
+  const [feedback, setFeedback] = useState("");
   const pending = findings.filter((finding) => finding.status === "new");
+
+  function openAdd(kind?: "partner" | "note") {
+    setEntryKind(kind ?? (partner ? "note" : "partner"));
+    setFileName("");
+    setFile(null);
+    setFeedback("");
+    setAddOpen(true);
+  }
+
+  function closeAdd() {
+    if (!saving) setAddOpen(false);
+  }
 
   async function savePartner(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     setSaving(true);
+    setFeedback("");
     try {
-      const label = await onSaveEntry({
+      await onSaveEntry({
         kind: "partner",
         name: String(form.get("name") ?? ""),
         company: String(form.get("company") ?? ""),
-        relationshipManager: String(form.get("relationshipManager") ?? ""),
+        relationshipManager: "",
         email: String(form.get("email") ?? ""),
       });
-      setIsError(false);
-      setSuccess(`${label} wurde angelegt.`);
-      event.currentTarget.reset();
+      formElement.reset();
+      setAddOpen(false);
     } catch (error) {
-      setIsError(true);
-      setSuccess(errorMessage(error, "Der Vermittler konnte nicht angelegt werden."));
+      setFeedback(error instanceof Error ? error.message : "Der Vermittler konnte nicht angelegt werden.");
     } finally {
       setSaving(false);
     }
@@ -48,87 +59,112 @@ export function InspectorPanel({ partner, findings, mobileOpen, onCloseMobile, o
 
   async function saveNote(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     setSaving(true);
+    setFeedback("");
+    const partnerName = String(form.get("partnerName") ?? "");
+    const selectedPartnerMatches = partner?.name.trim().toLocaleLowerCase("de-DE") === partnerName.trim().toLocaleLowerCase("de-DE");
     try {
-      const label = await onSaveEntry({
+      await onSaveEntry({
         kind: "note",
-        partnerName: String(form.get("partnerName") ?? ""),
+        partnerName,
         date: String(form.get("date") ?? ""),
+        title: String(form.get("title") ?? "Gesprächsnotiz"),
         content: String(form.get("content") ?? ""),
+        participants: String(form.get("participants") ?? ""),
+        nextSteps: String(form.get("nextSteps") ?? ""),
         fileName,
         file,
-        vermittlerNr: partner?.vermittlerNr,
+        vermittlerNr: selectedPartnerMatches ? partner?.vermittlerNr : undefined,
       });
-      setIsError(false);
-      setSuccess(`${label} wurde gespeichert.`);
-      event.currentTarget.reset();
+      formElement.reset();
       setFileName("");
       setFile(null);
+      setAddOpen(false);
     } catch (error) {
-      setIsError(true);
-      setSuccess(errorMessage(error, "Die Notiz konnte nicht gespeichert werden."));
+      setFeedback(error instanceof Error ? error.message : "Die Gesprächsnotiz konnte nicht gespeichert werden.");
     } finally {
       setSaving(false);
     }
   }
 
-  function openManual(kind: "partner" | "note") {
-    setEntryKind(kind);
-    setActiveTab("manual");
-    setSuccess("");
-  }
-
   return (
-    <aside className="inspector-panel" data-mobile-open={mobileOpen} aria-label="Partnerakte und manuelle Eingabe">
-      <div className="inspector-heading"><div><span className="eyebrow">PARTNERAKTE</span><h2>{partner?.name ?? "Noch keine Akte"}</h2><p>{partner ? <>{partner.company} <span>·</span> {partner.partnerId}</> : "Suche einen Vermittler im Chat oder lege ihn manuell an."}</p></div><button className="icon-button inspector-close" aria-label="Details schließen" onClick={onCloseMobile}><Icon name="close" /></button></div>
+    <aside className="inspector-panel" data-mobile-open={mobileOpen} aria-label="Partnerakte">
+      <div className="inspector-heading">
+        <div>
+          <span className="eyebrow">PARTNERAKTE</span>
+          <h2>{partner?.name ?? "Noch keine Akte"}</h2>
+          <p>{partner ? <>{partner.company} <span>·</span> {partner.partnerId}</> : "Suche einen Vermittler im Chat oder lege ihn selbst an."}</p>
+        </div>
+        <div className="inspector-actions">
+          <button className="add-entry-button" type="button" onClick={() => openAdd()}><Icon name="plus" size={16} /><span>Hinzufügen</span></button>
+          <button className="icon-button inspector-close" aria-label="Details schließen" onClick={onCloseMobile}><Icon name="close" /></button>
+        </div>
+      </div>
       {partner && <div className="partner-status-row"><span className="status-dot" />{partner.status}<span className="status-separator">·</span><span>Betreut von {partner.relationshipManager}</span></div>}
 
-      <div className="inspector-tabs" role="tablist" aria-label="Partnerakten-Bereich">
-        <button type="button" role="tab" aria-selected={activeTab === "findings"} className={activeTab === "findings" ? "is-active" : ""} onClick={() => setActiveTab("findings")}><Icon name="sparkle" size={15} />Erkannt{pending.length > 0 && <span className="tab-count">{pending.length}</span>}</button>
-        <button type="button" role="tab" aria-selected={activeTab === "manual"} className={activeTab === "manual" ? "is-active" : ""} onClick={() => { setActiveTab("manual"); setSuccess(""); }}><Icon name="plus" size={15} />Manuell</button>
+      {partnerDetail && <section className="partner-profile" aria-label="Daten aus der Partnerdatenbank">
+        <div className="partner-profile-heading"><h3>Partnerprofil</h3><span>Live aus Datenbank</span></div>
+        <dl>
+          <div><dt>Vermittler-ID</dt><dd>{partnerDetail.partnerId}</dd></div>
+          <div><dt>Unternehmen</dt><dd>{partnerDetail.company}</dd></div>
+          {partnerDetail.location && <div><dt>Standort</dt><dd>{partnerDetail.location}</dd></div>}
+          {partnerDetail.email && <div><dt>E-Mail</dt><dd>{partnerDetail.email}</dd></div>}
+          {partnerDetail.branch && <div><dt>Filiale</dt><dd>{partnerDetail.branch}{partnerDetail.marketArea ? ` · ${partnerDetail.marketArea}` : ""}</dd></div>}
+        </dl>
+        {partnerDetail.businessFigures[0] && <div className="partner-figure"><span>Volumen {partnerDetail.businessFigures[0].year}</span><strong>{new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(partnerDetail.businessFigures[0].volume)}</strong><small>{partnerDetail.businessFigures[0].loanCount} Darlehen</small></div>}
+        {partnerDetail.interests.length > 0 && <div className="partner-tags">{partnerDetail.interests.slice(0, 3).map((interest) => <span key={interest}>{interest}</span>)}</div>}
+      </section>}
+
+      <div className="inspector-tabs inspector-tabs-single" aria-label="Partnerakten-Bereich">
+        <span><Icon name="sparkle" size={15} />Aus dem Chat erkannt{pending.length > 0 && <span className="tab-count">{pending.length}</span>}</span>
       </div>
 
-      {activeTab === "findings" ? (
-        <div className="inspector-scroll">
-          <div className="section-title-row"><div><h3>Aus dem Chat erkannt</h3><p>Prüfe die Angaben, bevor sie gespeichert werden.</p></div><span className="source-count"><Icon name="file" size={14} />{findings.length} Angaben</span></div>
-          {findings.length === 0 ? <div className="review-note"><Icon name="sparkle" size={15} /><p>Wenn der Copilot konkrete Angaben zu einer Partnerakte erkennt, erscheinen sie hier zur Bestätigung.</p></div> : <>
-
+      <div className="inspector-scroll">
+        <div className="section-title-row"><div><h3>Aus dem Chat erkannt</h3><p>Prüfe die Angaben, bevor sie gespeichert werden.</p></div><span className="source-count"><Icon name="file" size={14} />{findings.length} Angaben</span></div>
+        {findings.length === 0 ? <div className="review-note"><Icon name="sparkle" size={15} /><p>Wenn der Copilot konkrete Angaben zu einer Partnerakte erkennt, erscheinen sie hier zur Bestätigung.</p></div> : <>
           <div className="finding-group"><div className="finding-group-heading"><span className="group-icon"><Icon name="person" size={15} /></span><h4>Partner & Gespräch</h4></div>{findings.filter((finding) => finding.group === "partner").map((finding) => <FindingRow key={finding.id} finding={finding} />)}</div>
           <div className="finding-group"><div className="finding-group-heading"><span className="group-icon blue"><Icon name="briefcase" size={15} /></span><h4>Geschäftsdaten</h4></div>{findings.filter((finding) => finding.group === "business").map((finding) => <FindingRow key={finding.id} finding={finding} />)}</div>
           <div className="finding-group"><div className="finding-group-heading"><span className="group-icon amber"><Icon name="calendar" size={15} /></span><h4>Nächster Schritt</h4></div>{findings.filter((finding) => finding.group === "next-step").map((finding) => <FindingRow key={finding.id} finding={finding} />)}</div>
-
           <div className="review-note"><Icon name="sparkle" size={15} /><p>Die Angaben stammen aus dem Chat. Vor dem Übernehmen bitte gegenprüfen.</p></div>
           <button type="button" className={`confirm-button ${pending.length === 0 ? "is-confirmed" : ""}`} disabled={pending.length === 0 || !partner} onClick={() => onConfirmFindings(pending.map((finding) => finding.id))}><Icon name="check" size={17} />{pending.length === 0 ? "Angaben übernommen" : `Alle ${pending.length} Angaben übernehmen`}</button>
-          </>}
-          <button type="button" className="secondary-wide-button" onClick={() => openManual("note")}><Icon name="note" size={16} />Gesprächsnotiz manuell ergänzen</button>
-        </div>
-      ) : (
-        <div className="inspector-scroll manual-scroll">
-          <div className="section-title-row"><div><h3>Eintrag erstellen</h3><p>Lege Informationen direkt in der Partnerakte an.</p></div></div>
-          <div className="entry-type-switch" role="tablist" aria-label="Eintragstyp"><button className={entryKind === "partner" ? "is-active" : ""} onClick={() => { setEntryKind("partner"); setSuccess(""); }} type="button"><Icon name="person" size={15} />Vermittler</button><button className={entryKind === "note" ? "is-active" : ""} onClick={() => { setEntryKind("note"); setSuccess(""); }} type="button"><Icon name="note" size={15} />Gesprächsnotiz</button></div>
-          {success && <div className={`success-banner ${isError ? "is-error" : ""}`} role={isError ? "alert" : "status"}><Icon name={isError ? "close" : "check"} size={16} />{success}</div>}
+        </>}
+      </div>
+
+      {addOpen && <div className="add-entry-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeAdd(); }}>
+        <section className="add-entry-dialog" role="dialog" aria-modal="true" aria-labelledby="add-entry-title">
+          <div className="add-entry-header">
+            <div><span className="eyebrow">MANUELL HINZUFÜGEN</span><h3 id="add-entry-title">Was möchtest du anlegen?</h3><p>Lege Vermittlerdaten, Gesprächsinhalte und optionale Dokumente direkt ab.</p></div>
+            <button type="button" className="icon-button" aria-label="Dialog schließen" onClick={closeAdd} disabled={saving}><Icon name="close" /></button>
+          </div>
+          <div className="entry-type-switch" role="tablist" aria-label="Eintragstyp">
+            <button className={entryKind === "partner" ? "is-active" : ""} onClick={() => { setEntryKind("partner"); setFeedback(""); }} type="button"><Icon name="person" size={16} /><span><strong>Vermittler</strong><small>Partnerakte anlegen</small></span></button>
+            <button className={entryKind === "note" ? "is-active" : ""} onClick={() => { setEntryKind("note"); setFeedback(""); }} type="button"><Icon name="note" size={16} /><span><strong>Gespräch & Dokument</strong><small>Notiz oder Anhang speichern</small></span></button>
+          </div>
+          {feedback && <div className="form-feedback" role="alert">{feedback}</div>}
           {entryKind === "partner" ? (
             <form className="entry-form" onSubmit={savePartner}>
               <label>Vor- und Nachname<input name="name" placeholder="z. B. Alex Beispiel" required /></label>
               <label>Unternehmen<input name="company" placeholder="Name des Unternehmens" required /></label>
-              <label>Betreuende Person<input name="relationshipManager" placeholder="Name der Betreuung" /></label>
-              <label>E-Mail-Adresse<input name="email" type="email" placeholder="name@beispiel.de" /></label>
+              <label>E-Mail-Adresse <span className="optional">optional</span><input name="email" type="email" placeholder="name@beispiel.de" /></label>
               <div className="form-footnote"><Icon name="clock" size={14} />Der Vermittler wird direkt in der Partnerdatenbank angelegt.</div>
               <button className="confirm-button" type="submit" disabled={saving}><Icon name="plus" size={17} />{saving ? "Wird gespeichert …" : "Vermittler anlegen"}</button>
             </form>
           ) : (
             <form className="entry-form" onSubmit={saveNote}>
-              <label>Vermittler<input name="partnerName" defaultValue={partner?.name ?? ""} placeholder="Vor- und Nachname" required /></label>
-              <label>Gesprächsdatum<input type="date" name="date" defaultValue={today} required /></label>
-              <label>Gesprächsnotiz<textarea name="content" rows={6} placeholder="Themen, Entscheidungen und nächste Schritte …" required /></label>
-              <label className="upload-field"><span>Dokument anhängen</span><div className="upload-control"><Icon name="upload" size={16} /><span>{fileName || "PDF, DOCX oder TXT auswählen"}</span><input type="file" accept=".pdf,.doc,.docx,.txt" onChange={(event) => { const selected = event.target.files?.[0] ?? null; setFile(selected); setFileName(selected?.name ?? ""); }} /></div></label>
-              <div className="form-footnote"><Icon name="clock" size={14} />Die Notiz wird mit dem optionalen Anhang in der Partnerakte gespeichert.</div>
-              <button className="confirm-button" type="submit" disabled={saving}><Icon name="plus" size={17} />{saving ? "Wird gespeichert …" : "Gesprächsnotiz speichern"}</button>
+              <div className="form-two-columns"><label>Vermittler<input name="partnerName" defaultValue={partner?.name ?? ""} placeholder="Vor- und Nachname" required /></label><label>Gesprächsdatum<input type="date" name="date" defaultValue={today} required /></label></div>
+              <label>Titel<input name="title" defaultValue="Gesprächsnotiz" placeholder="z. B. Jahresgespräch" required /></label>
+              <label>Teilnehmende <span className="optional">optional</span><input name="participants" placeholder="Namen mit Komma trennen" /></label>
+              <label>Gesprächsnotiz<textarea name="content" rows={5} placeholder="Themen, Entscheidungen und wichtige Informationen …" required /></label>
+              <label>Nächste Schritte <span className="optional">eine Zeile pro Maßnahme</span><textarea name="nextSteps" rows={3} placeholder={"Termin mit Partner vereinbaren\nUnterlagen nachreichen"} /></label>
+              <label className="upload-field"><span>Dokument anhängen <span className="optional">optional</span></span><div className="upload-control"><Icon name="upload" size={16} /><span>{fileName || "PDF, DOC, DOCX oder TXT auswählen"}</span><input type="file" accept=".pdf,.doc,.docx,.txt" onChange={(event) => { const selected = event.target.files?.[0] ?? null; setFile(selected); setFileName(selected?.name ?? ""); }} /></div></label>
+              <div className="form-footnote"><Icon name="clock" size={14} />Notiz, Teilnehmende, Maßnahmen und der optionale Anhang werden in der Partnerakte gespeichert.</div>
+              <button className="confirm-button" type="submit" disabled={saving}><Icon name="plus" size={17} />{saving ? "Wird gespeichert …" : "In Partnerakte speichern"}</button>
             </form>
           )}
-        </div>
-      )}
+        </section>
+      </div>}
     </aside>
   );
 }
