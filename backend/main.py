@@ -516,6 +516,16 @@ def get_chat_workspace(conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
 
 @app.post("/api/chat/conversations", tags=["Chat"], status_code=201, summary="Neuen Chat anlegen")
 def create_chat_conversation(body: ChatKonversationCreate, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    # Mehrfaches Klicken auf "Neuer Chat" darf keine Liste leerer Unterhaltungen erzeugen.
+    empty_conversation = conn.execute(
+        "SELECT c.id, c.titel, c.vermittler_nr, c.aktualisiert_am, 'Noch keine Nachrichten' AS vorschau "
+        "FROM chat_konversation c WHERE NOT EXISTS ("
+        "SELECT 1 FROM chat_nachricht m WHERE m.konversation_id = c.id"
+        ") ORDER BY c.aktualisiert_am DESC, c.erstellt_am DESC LIMIT 1"
+    ).fetchone()
+    if empty_conversation is not None:
+        return dict(empty_conversation)
+
     conversation_id = str(uuid4())
     conn.execute("INSERT INTO chat_konversation (id, titel) VALUES (?, ?)", (conversation_id, body.titel.strip()))
     row = conn.execute(

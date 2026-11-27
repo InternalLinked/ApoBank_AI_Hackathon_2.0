@@ -186,6 +186,14 @@ def test_chat_database_fallback_opens_partnerakte_without_openai(client):
     assert client.get("/api/health").json()["vermittler_count"] == 3
 
 
+def test_creating_chat_twice_reuses_empty_conversation(client):
+    first = client.post("/api/chat/conversations", json={"titel": "Neue Unterhaltung"}).json()
+    second = client.post("/api/chat/conversations", json={"titel": "Neue Unterhaltung"}).json()
+    assert second["id"] == first["id"]
+    workspace = client.get("/api/chat/workspace").json()
+    assert len(workspace["conversations"]) == 1
+
+
 def test_document_upload_persists_participants_and_next_steps(client):
     response = client.post(
         "/api/vermittler/4251/dokumente",
