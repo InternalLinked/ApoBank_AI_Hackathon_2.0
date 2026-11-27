@@ -20,16 +20,21 @@ class EinstellungsFehler(RuntimeError):
 
 
 def lade_dotenv(pfad: Path | None = None) -> None:
-    """KEY=VALUE-Zeilen aus .env übernehmen, ohne gesetzte Umgebungsvariablen zu überschreiben."""
-    pfad = pfad or REPO_ROOT / ".env"
-    if not pfad.is_file():
-        return
-    for roh in pfad.read_text(encoding="utf-8").splitlines():
-        zeile = roh.strip()
-        if not zeile or zeile.startswith("#") or "=" not in zeile:
+    """KEY=VALUE-Zeilen übernehmen, ohne gesetzte Umgebungsvariablen zu überschreiben.
+
+    Ohne `pfad`: erst `.env.local` (geheime Schlüssel), dann `.env` – wie in backend/config.py,
+    damit ein leeres `OPENAI_API_KEY=` in `.env` den Schlüssel aus `.env.local` nicht verdeckt.
+    """
+    pfade = [pfad] if pfad else [REPO_ROOT / ".env.local", REPO_ROOT / ".env"]
+    for datei in pfade:
+        if not datei.is_file():
             continue
-        key, wert = zeile.split("=", 1)
-        os.environ.setdefault(key.strip(), wert.split(" #", 1)[0].strip().strip('"').strip("'"))
+        for roh in datei.read_text(encoding="utf-8-sig").splitlines():
+            zeile = roh.strip()
+            if not zeile or zeile.startswith("#") or "=" not in zeile:
+                continue
+            key, wert = zeile.split("=", 1)
+            os.environ.setdefault(key.strip(), wert.split(" #", 1)[0].strip().strip('"').strip("'"))
 
 
 def _ja(wert: str | None) -> bool:
