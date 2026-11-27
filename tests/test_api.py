@@ -44,6 +44,8 @@ def client(tmp_path, monkeypatch):
     wb.save(xlsx)
     monkeypatch.setattr(settings, "db_path", tmp_path / "test.db")
     monkeypatch.setattr(settings, "vault_path", tmp_path / "vault")
+    monkeypatch.setattr(settings, "upload_path", tmp_path / "uploads")
+    monkeypatch.setattr(settings, "openai_api_key", None)
     import_excel.run(xlsx)
     from backend.main import app
     with TestClient(app) as c:
@@ -168,3 +170,35 @@ def test_404(client):
     assert client.get("/api/vermittler/999999").status_code == 404
     assert client.post("/api/vermittler/999999/obsidian/eintraege",
                        json={"titel": "t", "inhalt": "x"}).status_code == 404
+
+
+def test_chat_database_fallback_opens_partnerakte_without_openai(client):
+    conversation = client.post("/api/chat/conversations", json={"titel": "Neue Unterhaltung"}).json()
+    reply = client.post(
+        f"/api/chat/conversations/{conversation['id']}/messages",
+        json={"inhalt": "Zeig mir die Partnerakte von Hans Baumann"},
+    )
+    assert reply.status_code == 200, reply.text
+    payload = reply.json()
+    assert payload["openai_configured"] is False
+    assert payload["partner"]["vermittler_nr"] == 4251
+    assert payload["message"]["metadata"]["sources"] == ["Partnerdatenbank"]
+    assert client.get("/api/health").json()["vermittler_count"] == 3
+
+
+def test_document_upload_persists_participants_and_next_steps(client):
+    response = client.post(
+        "/api/vermittler/4251/dokumente",
+        data={
+            "titel": "Gespräch mit Anhang",
+            "inhalt": "Besprochene Konditionen.",
+            "datum": "2026-11-27",
+            "teilnehmer": "Dr. Baumann, Schumann",
+            "massnahmen": "Konditionen senden\nTermin abstimmen",
+        },
+        files={"file": ("gespraech.txt", b"Interne Gespraechsnotiz", "text/plain")},
+    )
+    assert response.status_code == 201, response.text
+    note = (settings.vault_path / response.json()["datei"]).read_text(encoding="utf-8")
+    assert "**Teilnehmer:** Dr. Baumann, Schumann" in note
+    assert "- [ ] Konditionen senden" in note and "- [ ] Termin abstimmen" in note

@@ -107,8 +107,12 @@ def _chat_message(row: sqlite3.Row) -> dict[str, Any]:
 
 
 @app.get("/api/health", tags=["Meta"], summary="Laufzeitstatus fuer die Weboberflaeche")
-def health() -> dict[str, Any]:
-    return {"status": "ok", "openai_configured": bool(settings.openai_api_key)}
+def health(conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "openai_configured": bool(settings.openai_api_key),
+        "vermittler_count": conn.execute("SELECT COUNT(*) FROM vermittler").fetchone()[0],
+    }
 
 
 # =========================================================================== Meta

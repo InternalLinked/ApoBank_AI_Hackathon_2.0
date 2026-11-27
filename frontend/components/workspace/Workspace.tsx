@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createWorkspaceApi } from "@/lib/workspace-api";
-import type { ChatMessage, ExtractedFinding, ManualEntryInput, WorkspaceApi, WorkspaceSnapshot } from "@/lib/workspace-contracts";
+import type { ChatMessage, ExtractedFinding, ManualEntryInput, PartnerDetail, PartnerSummary, WorkspaceApi, WorkspaceSnapshot } from "@/lib/workspace-contracts";
 import { ChatSidebar } from "./ChatSidebar";
 import { ConversationPane } from "./ConversationPane";
 import { InspectorPanel } from "./InspectorPanel";
@@ -24,6 +24,31 @@ export function Workspace() {
   const [isSending, setIsSending] = useState(false);
   const [mobileDrawer, setMobileDrawer] = useState<"chats" | "details" | null>(null);
   const [toast, setToast] = useState("");
+  const [partnerDetail, setPartnerDetail] = useState<PartnerDetail | null>(null);
+  const partnerRequest = useRef(0);
+
+  async function loadPartnerDetail(partner: PartnerSummary | null) {
+    const requestId = ++partnerRequest.current;
+    if (!partner) {
+      setPartnerDetail(null);
+      return;
+    }
+    try {
+      const detail = await api.getPartnerDetail(partner.vermittlerNr);
+      if (requestId !== partnerRequest.current) return;
+      setPartnerDetail(detail);
+      setSnapshot((current) => current.partner?.vermittlerNr === partner.vermittlerNr ? { ...current, partner: detail } : current);
+    } catch (error) {
+      if (requestId !== partnerRequest.current) return;
+      setPartnerDetail(null);
+      setToast(error instanceof Error ? error.message : "Partnerakte konnte nicht geladen werden.");
+    }
+  }
+
+  function setCurrentPartner(partner: PartnerSummary | null) {
+    setSnapshot((current) => ({ ...current, partner }));
+    void loadPartnerDetail(partner);
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -31,16 +56,10 @@ export function Workspace() {
       try {
         const initial = await api.loadWorkspace();
         if (!mounted) return;
-        if (initial.conversations.length === 0) {
-          const conversation = await api.createConversation();
-          if (!mounted) return;
-          setSnapshot({ ...initial, conversations: [conversation], messagesByConversation: { [conversation.id]: [] } });
-          setActiveConversationId(conversation.id);
-          return;
-        }
         setSnapshot(initial);
         setFindings(initial.findings);
-        setActiveConversationId(initial.conversations[0].id);
+        setActiveConversationId(initial.conversations[0]?.id ?? "");
+        void loadPartnerDetail(initial.partner);
       } catch (error) {
         if (mounted) setToast(error instanceof Error ? error.message : "Die Verbindung zum Backend konnte nicht aufgebaut werden.");
       }
@@ -81,6 +100,7 @@ export function Workspace() {
       const reply = await api.sendMessage(conversationId, content);
       addMessage(conversationId, reply.message);
       setSnapshot((current) => ({ ...current, partner: reply.partner ?? current.partner, aiConfigured: reply.aiConfigured }));
+      if (reply.partner) void loadPartnerDetail(reply.partner);
       if (reply.findings.length > 0) setFindings(reply.findings);
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Die Anfrage konnte nicht beantwortet werden.");
@@ -90,6 +110,10 @@ export function Workspace() {
   }
 
   async function createConversation() {
+    if (activeConversationId && activeMessages.length === 0) {
+      setMobileDrawer(null);
+      return;
+    }
     try {
       const conversation = await api.createConversation();
       setSnapshot((current) => ({
@@ -98,6 +122,7 @@ export function Workspace() {
         messagesByConversation: { ...current.messagesByConversation, [conversation.id]: [] },
         partner: null,
       }));
+      void loadPartnerDetail(null);
       setFindings([]);
       setActiveConversationId(conversation.id);
       setMobileDrawer(null);
@@ -110,7 +135,7 @@ export function Workspace() {
     const saved = await api.createEntry(input);
     setToast(`${saved.label} wurde gespeichert.`);
     const savedPartner = saved.partner;
-    if (savedPartner) setSnapshot((current) => ({ ...current, partner: savedPartner }));
+    if (savedPartner) setCurrentPartner(savedPartner);
     return saved.label;
   }
 
@@ -130,7 +155,7 @@ export function Workspace() {
     const latest = [...(snapshot.messagesByConversation[conversationId] ?? [])].reverse().find((message) => message.role === "assistant");
     setFindings(latest?.findings ?? []);
     const selectedPartner = latest?.partner;
-    if (selectedPartner) setSnapshot((current) => ({ ...current, partner: selectedPartner }));
+    setCurrentPartner(selectedPartner ?? null);
   }
 
   return (
@@ -138,7 +163,7 @@ export function Workspace() {
       {mobileDrawer && <button className="mobile-backdrop" aria-label="Seitenleiste schließen" onClick={() => setMobileDrawer(null)} />}
       <ChatSidebar conversations={snapshot.conversations} activeConversationId={activeConversationId} mobileOpen={mobileDrawer === "chats"} onCloseMobile={() => setMobileDrawer(null)} onSelect={selectConversation} onNewConversation={createConversation} />
       <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} onOpenDetails={() => setMobileDrawer("details")} />
-      <InspectorPanel partner={snapshot.partner} findings={findings} mobileOpen={mobileDrawer === "details"} onCloseMobile={() => setMobileDrawer(null)} onSaveEntry={saveEntry} onConfirmFindings={confirmFindings} />
+      <InspectorPanel partner={snapshot.partner} partnerDetail={partnerDetail} findings={findings} mobileOpen={mobileDrawer === "details"} onCloseMobile={() => setMobileDrawer(null)} onSaveEntry={saveEntry} onConfirmFindings={confirmFindings} />
       {toast && <div className="toast" role="status"><Icon name="check" size={16} />{toast}<button onClick={() => setToast("")} aria-label="Hinweis schließen"><Icon name="close" size={15} /></button></div>}
     </div>
   );

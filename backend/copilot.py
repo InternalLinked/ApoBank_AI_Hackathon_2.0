@@ -6,6 +6,7 @@ erkannte Angaben zuerst zur Prüfung und schreibt erst nach einem expliziten Kli
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from typing import Any
@@ -150,6 +151,70 @@ def _portfolio_ueberblick(conn: sqlite3.Connection) -> dict[str, Any]:
     }
 
 
+_FALLBACK_STOPWORDS = {
+    "akte", "aktuelle", "alle", "bitte", "dem", "den", "der", "des", "die", "ein", "eine", "einen",
+    "für", "fuer", "gespräch", "gespraech", "ich", "im", "in", "ist", "letzte", "mir", "nach", "notiz",
+    "partner", "partnerakte", "protokoll", "suche", "und", "vermittler", "von", "was", "welche", "zeige", "zeig",
+    "zusammen", "zusammenfassen",
+}
+
+
+def _datenbank_fallback(conn: sqlite3.Connection, message: str) -> CopilotReply:
+    """Liefert bei fehlendem KI-Key mindestens verlässliche Partnerdatenbank-Treffer."""
+    tokens = re.findall(r"[\wÄÖÜäöüß-]+", message.lower())
+    query = " ".join(token for token in tokens if len(token) > 1 and token not in _FALLBACK_STOPWORDS)
+    if query:
+        items = _search_vermittler(conn, query).get("items", [])
+        if len(items) == 1:
+            item = items[0]
+            nr = int(item["vermittler_nr"])
+            profile = db.get_vermittler_full(conn, nr)
+            if profile:
+                zahlen = profile.get("geschaeftszahlen") or []
+                latest = zahlen[0] if zahlen else None
+                summary = f"{profile['anzeigename']} · {profile.get('firma_filiale') or 'Kein Unternehmen hinterlegt'} · {profile.get('status', 'aktiv')}"
+                if latest:
+                    summary += f" · {latest['jahr']}: {latest['volumen_eur']:,} € Kreditvolumen"
+                return CopilotReply(
+                    content=(
+                        f"Ich habe {summary} in der Partnerdatenbank gefunden. "
+                        "Die vollständige Partnerakte ist rechts geöffnet. Für freie Analysen und Zusammenfassungen bitte den KI-Key hinterlegen."
+                    ),
+                    configured=False,
+                    vermittler_nr=nr,
+                    sources=["Partnerdatenbank"],
+                )
+        if len(items) > 1:
+            choices = ", ".join(
+                f"{item.get('vorname', '')} {item.get('name', '')} ({item.get('vermittler_nr')})".strip()
+                for item in items[:5]
+            )
+            return CopilotReply(
+                content=f"Ich habe mehrere passende Vermittler gefunden: {choices}. Bitte nenne den Namen oder die Vermittlernummer genauer.",
+                configured=False,
+                sources=["Partnerdatenbank"],
+            )
+
+    count = conn.execute("SELECT COUNT(*) FROM vermittler").fetchone()[0]
+    if count == 0:
+        return CopilotReply(
+            content=(
+                "Die Partnerdatenbank ist erreichbar, enthält aber noch keine importierten Vermittler. "
+                "Lege die Musterliste unter data/Musterliste_apoBank.xlsx ab und starte den Import neu."
+            ),
+            configured=False,
+            sources=["Partnerdatenbank"],
+        )
+    return CopilotReply(
+        content=(
+            "Ich finde dazu keinen eindeutigen Vermittler. Nenne bitte Name, Ort oder Vermittlernummer. "
+            "Für freie Fragen, Zusammenfassungen und Analysen wird zusätzlich ein OPENAI_API_KEY benötigt."
+        ),
+        configured=False,
+        sources=["Partnerdatenbank"],
+    )
+
+
 def _execute_tool(conn: sqlite3.Connection, name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any], int | None, list[dict[str, str]], str | None]:
     if name == "suche_vermittler":
         return _search_vermittler(conn, str(arguments["suchbegriff"])), None, [], "Partnerdatenbank"
@@ -181,13 +246,8 @@ def _execute_tool(conn: sqlite3.Connection, name: str, arguments: dict[str, Any]
 def antwort_auf_nachricht(conn: sqlite3.Connection, history: list[dict[str, str]]) -> CopilotReply:
     """Fuehrt den Responses-API-Tool-Loop mit ausschliesslich lesenden Tools aus."""
     if not settings.openai_api_key:
-        return CopilotReply(
-            content=(
-                "Die KI ist noch nicht eingerichtet. Hinterlege `OPENAI_API_KEY` im Backend und starte den "
-                "Server neu. Manuelle Eintraege und die Partnerdatenbank bleiben weiterhin verfuegbar."
-            ),
-            configured=False,
-        )
+        latest_user_message = next((item["content"] for item in reversed(history) if item["role"] == "user"), "")
+        return _datenbank_fallback(conn, latest_user_message)
 
     try:
         from openai import OpenAI

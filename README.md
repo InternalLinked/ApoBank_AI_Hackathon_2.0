@@ -130,7 +130,7 @@ Der Copilot nutzt die OpenAI Responses API mit ausschließlich lesenden Werkzeug
 
 ### Lokal mit Docker
 
-Für die gemeinsame lokale Vorschau verwende `docker compose up --build`. Die Compose-Konfiguration bindet `./data` und `./vault` persistent in den Container ein. Liegt beim ersten Start eine Quelldatei unter `data/Musterliste_apoBank.xlsx`, wird sie automatisch in `data/apobank.db` importiert. Eine vorhandene `data/apobank.db` hat immer Vorrang und wird nicht überschrieben.
+Für die gemeinsame lokale Vorschau verwende `docker compose up --build`. Die Compose-Konfiguration bindet `./data` und `./vault` persistent in den Container ein. Liegt beim Start eine Quelldatei unter `data/Musterliste_apoBank.xlsx` und die Datenbank ist noch leer, wird sie automatisch in `data/apobank.db` importiert. Eine bereits befüllte `data/apobank.db` hat immer Vorrang und wird nicht überschrieben.
 
 Wird die Excel-Datei erst nach dem ersten Start bereitgestellt, importiert sie ein Teammitglied bewusst mit:
 

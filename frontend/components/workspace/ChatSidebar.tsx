@@ -28,7 +28,7 @@ export function ChatSidebar({
   return (
     <aside className="chat-sidebar" data-mobile-open={mobileOpen} aria-label="Chatverläufe">
       <div className="sidebar-brand">
-        <div className="brand-mark" aria-hidden="true"><span className="brand-symbol">a</span><span className="brand-stem" /></div>
+        <img className="brand-mark" src="/apobank-logo.svg" alt="apoBank" width={72} height={72} />
         <div className="brand-copy"><strong>apoBank</strong><span>Bank der Gesundheit</span><small>Partner-Copilot</small></div>
         <button className="icon-button sidebar-close" aria-label="Chats schließen" onClick={onCloseMobile}><Icon name="close" /></button>
       </div>

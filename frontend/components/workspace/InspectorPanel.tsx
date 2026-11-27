@@ -1,9 +1,10 @@
 import { FormEvent, useState } from "react";
-import type { ExtractedFinding, ManualEntryInput, PartnerSummary } from "@/lib/workspace-contracts";
+import type { ExtractedFinding, ManualEntryInput, PartnerDetail, PartnerSummary } from "@/lib/workspace-contracts";
 import { Icon } from "./Icons";
 
 type InspectorPanelProps = {
   partner: PartnerSummary | null;
+  partnerDetail: PartnerDetail | null;
   findings: ExtractedFinding[];
   mobileOpen: boolean;
   onCloseMobile: () => void;
@@ -11,7 +12,7 @@ type InspectorPanelProps = {
   onConfirmFindings: (findingIds: string[]) => void;
 };
 
-export function InspectorPanel({ partner, findings, mobileOpen, onCloseMobile, onSaveEntry, onConfirmFindings }: InspectorPanelProps) {
+export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, onCloseMobile, onSaveEntry, onConfirmFindings }: InspectorPanelProps) {
   const today = new Date().toISOString().slice(0, 10);
   const [addOpen, setAddOpen] = useState(false);
   const [entryKind, setEntryKind] = useState<"partner" | "note">("partner");
@@ -62,10 +63,12 @@ export function InspectorPanel({ partner, findings, mobileOpen, onCloseMobile, o
     const form = new FormData(formElement);
     setSaving(true);
     setFeedback("");
+    const partnerName = String(form.get("partnerName") ?? "");
+    const selectedPartnerMatches = partner?.name.trim().toLocaleLowerCase("de-DE") === partnerName.trim().toLocaleLowerCase("de-DE");
     try {
       await onSaveEntry({
         kind: "note",
-        partnerName: String(form.get("partnerName") ?? ""),
+        partnerName,
         date: String(form.get("date") ?? ""),
         title: String(form.get("title") ?? "Gesprächsnotiz"),
         content: String(form.get("content") ?? ""),
@@ -73,7 +76,7 @@ export function InspectorPanel({ partner, findings, mobileOpen, onCloseMobile, o
         nextSteps: String(form.get("nextSteps") ?? ""),
         fileName,
         file,
-        vermittlerNr: partner?.vermittlerNr,
+        vermittlerNr: selectedPartnerMatches ? partner?.vermittlerNr : undefined,
       });
       formElement.reset();
       setFileName("");
@@ -100,6 +103,19 @@ export function InspectorPanel({ partner, findings, mobileOpen, onCloseMobile, o
         </div>
       </div>
       {partner && <div className="partner-status-row"><span className="status-dot" />{partner.status}<span className="status-separator">·</span><span>Betreut von {partner.relationshipManager}</span></div>}
+
+      {partnerDetail && <section className="partner-profile" aria-label="Daten aus der Partnerdatenbank">
+        <div className="partner-profile-heading"><h3>Partnerprofil</h3><span>Live aus Datenbank</span></div>
+        <dl>
+          <div><dt>Vermittler-ID</dt><dd>{partnerDetail.partnerId}</dd></div>
+          <div><dt>Unternehmen</dt><dd>{partnerDetail.company}</dd></div>
+          {partnerDetail.location && <div><dt>Standort</dt><dd>{partnerDetail.location}</dd></div>}
+          {partnerDetail.email && <div><dt>E-Mail</dt><dd>{partnerDetail.email}</dd></div>}
+          {partnerDetail.branch && <div><dt>Filiale</dt><dd>{partnerDetail.branch}{partnerDetail.marketArea ? ` · ${partnerDetail.marketArea}` : ""}</dd></div>}
+        </dl>
+        {partnerDetail.businessFigures[0] && <div className="partner-figure"><span>Volumen {partnerDetail.businessFigures[0].year}</span><strong>{new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(partnerDetail.businessFigures[0].volume)}</strong><small>{partnerDetail.businessFigures[0].loanCount} Darlehen</small></div>}
+        {partnerDetail.interests.length > 0 && <div className="partner-tags">{partnerDetail.interests.slice(0, 3).map((interest) => <span key={interest}>{interest}</span>)}</div>}
+      </section>}
 
       <div className="inspector-tabs inspector-tabs-single" aria-label="Partnerakten-Bereich">
         <span><Icon name="sparkle" size={15} />Aus dem Chat erkannt{pending.length > 0 && <span className="tab-count">{pending.length}</span>}</span>

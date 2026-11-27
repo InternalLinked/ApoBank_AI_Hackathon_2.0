@@ -4,6 +4,7 @@ import type {
   Conversation,
   ExtractedFinding,
   ManualEntryInput,
+  PartnerDetail,
   PartnerSummary,
   SavedEntry,
   WorkspaceApi,
@@ -101,6 +102,10 @@ function toConversation(value: unknown): Conversation {
   };
 }
 
+function isEmptyConversation(conversation: Conversation): boolean {
+  return conversation.title === "Neue Unterhaltung" && conversation.preview === "Noch keine Nachrichten";
+}
+
 function toPartnerFromProfile(value: unknown): PartnerSummary | null {
   const item = record(value);
   const nr = item.vermittler_nr;
@@ -112,6 +117,29 @@ function toPartnerFromProfile(value: unknown): PartnerSummary | null {
     partnerId: `VM-${nr}`,
     relationshipManager: String(record(item.betreuung).name ?? "Nicht zugeordnet"),
     status: statusLabel(item.status),
+  };
+}
+
+function toPartnerDetail(value: unknown): PartnerDetail | null {
+  const item = record(value);
+  const summary = toPartnerFromProfile(item);
+  if (!summary) return null;
+  const contact = record(item.kontakt);
+  const betreuung = record(item.betreuung);
+  const figures = Array.isArray(item.geschaeftszahlen) ? item.geschaeftszahlen.map(record) : [];
+  return {
+    ...summary,
+    email: String(contact.email ?? ""),
+    phone: String(contact.telefon_dienst ?? contact.handy_dienst ?? ""),
+    location: [contact.plz, contact.ort].filter(Boolean).join(" "),
+    branch: String(betreuung.filiale ?? ""),
+    marketArea: String(betreuung.marktgebiet ?? ""),
+    interests: Array.isArray(item.interessen) ? item.interessen.map(String) : [],
+    businessFigures: figures.map((figure) => ({
+      year: Number(figure.jahr ?? 0),
+      volume: Number(figure.volumen_eur ?? 0),
+      loanCount: Number(figure.anzahl_darlehen ?? 0),
+    })).filter((figure) => figure.year > 0),
   };
 }
 
@@ -153,7 +181,14 @@ export function createWorkspaceApi(): WorkspaceApi {
   return {
     async loadWorkspace(): Promise<WorkspaceSnapshot> {
       const data = record(await request<unknown>("/chat/workspace"));
-      const conversations = Array.isArray(data.conversations) ? data.conversations.map(toConversation) : [];
+      const allConversations = Array.isArray(data.conversations) ? data.conversations.map(toConversation) : [];
+      let emptyConversationShown = false;
+      const conversations = allConversations.filter((conversation) => {
+        if (!isEmptyConversation(conversation)) return true;
+        if (emptyConversationShown) return false;
+        emptyConversationShown = true;
+        return true;
+      });
       const rawMessages = record(data.messages_by_conversation);
       const messagesByConversation = Object.fromEntries(conversations.map((conversation) => {
         const rawConversationMessages = rawMessages[conversation.id];
@@ -192,6 +227,12 @@ export function createWorkspaceApi(): WorkspaceApi {
         findings: findingsFrom(data.findings),
         aiConfigured: data.openai_configured === true,
       };
+    },
+
+    async getPartnerDetail(vermittlerNr: number): Promise<PartnerDetail> {
+      const detail = toPartnerDetail(await request<unknown>(`/vermittler/${vermittlerNr}`));
+      if (!detail) throw new Error("Partnerakte konnte nicht geladen werden.");
+      return detail;
     },
 
     async createEntry(input: ManualEntryInput): Promise<SavedEntry> {
