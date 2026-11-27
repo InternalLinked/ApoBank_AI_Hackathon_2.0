@@ -73,10 +73,6 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 @media (hover: none) { .conversation-delete { opacity: 1; } }
 .empty-search { padding: 12px; color: #9db0ae; font-size: 14px; }
 .sidebar-bottom { flex: 0 0 auto; padding-top: 16px; }
-.sidebar-tip { display: flex; gap: 9px; margin: 0 1px 12px; padding: 12px 10px; border: 1px solid rgba(255,255,255,.075); border-radius: 11px; background: rgba(255,255,255,.035); }
-.tip-icon { display: grid; place-items: center; width: 25px; height: 25px; flex: 0 0 auto; border-radius: 8px; color: #a7e5d1; background: rgba(8,127,110,.32); }
-.sidebar-tip strong { display: block; color: #d9e9e3; font-size: 12.5px; }
-.sidebar-tip p { margin: 5px 0 0; color: #98afaa; font-size: 12.5px; line-height: 1.45; }
 .user-profile { display: flex; align-items: center; gap: 9px; width: 100%; padding: 11px 5px 3px; border: 0; border-top: 1px solid rgba(255,255,255,.09); color: #e4efeb; background: transparent; text-align: left; }
 .user-avatar { display: grid; place-items: center; width: 31px; height: 31px; flex: 0 0 auto; border: 1px solid rgba(255,255,255,.18); border-radius: 50%; color: #e8f6ef; background: #607d73; font-size: 12.5px; font-weight: 700; }
 .user-profile > span:nth-child(2) { display: flex; flex: 1; flex-direction: column; gap: 3px; }
@@ -597,6 +593,7 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 /* Rechte Leiste einfahren, wenn keine Partnerakte offen ist – der Chat bekommt den Platz.
    Die Leiste behält ihre Breite und gleitet nach rechts aus dem Bild (Spalte animiert auf 0). */
 .panel-expand { display: none; color: #6c7c7e; }
+.topbar-avatar { cursor: pointer; }
 @media (min-width: 901px) {
   .workspace-shell { transition: grid-template-columns .32s cubic-bezier(.2,.8,.28,1); }
   .inspector-panel { width: 400px; justify-self: start; transition: opacity .25s ease, box-shadow .25s ease; }

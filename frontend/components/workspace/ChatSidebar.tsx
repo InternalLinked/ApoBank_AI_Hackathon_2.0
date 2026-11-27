@@ -85,7 +85,6 @@ export function ChatSidebar({
       </nav>
 
       <div className="sidebar-bottom">
-        <div className="sidebar-tip"><span className="tip-icon"><Icon name="sparkle" size={16} /></span><div><strong>Copilot-Tipp</strong><p>Frage in natürlicher Sprache nach einer Partnerakte oder einem Vorgang.</p></div></div>
         <button className="user-profile" type="button">
           <span className="user-avatar">{accountName?.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() ?? "–"}</span>
           <span><strong>{accountName ?? "Kein Betreuerkonto"}</strong><small>Persönlicher Bereich</small></span>
