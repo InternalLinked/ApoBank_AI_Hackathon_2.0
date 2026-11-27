@@ -14,8 +14,9 @@ from backend.config import settings
     ("Die Telefonnummer von Scholz ist falsch", "aendern"),
     ("Ändere das Volumen 2025 auf 11 Mio", "aendern"),             # Aendern hat Vorrang vor Zahlen
     ("Zeig mir die Partnerakte von Jens Weber", "standard"),
-    ("Jens Weber hat einen Hund namens Tim", "standard"),
-    ("hallo 4251", "standard"),                                    # Zahl -> kein Smalltalk
+    ("Jens Weber hat einen Hund namens Tim", "aendern"),            # neue Info -> wird vorgeschlagen
+    ("füge bitte als Interesse Jagen hinzu", "aendern"),
+    ("Ergänze bei Scholz Golf als Hobby", "aendern"),    ("hallo 4251", "standard"),                                    # Zahl -> kein Smalltalk
 ])
 def test_stufen(text, stufe):
     assert modellwahl.waehle(text).stufe == stufe

@@ -43,7 +43,7 @@ export type ProposedChange = {
   label: string;
   oldValue: string | number | null;
   newValue: string | number | null;
-  kind: "stammdaten" | "kontakt" | "geschaeftszahlen" | "profil_fakt_aendern" | "profil_fakt_loeschen";
+  kind: "stammdaten" | "kontakt" | "geschaeftszahlen" | "profil_fakt_aendern" | "profil_fakt_loeschen" | "profil_fakt_neu" | "notiz_neu";
 };
 
 export type ChangeProposal = {

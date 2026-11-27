@@ -252,7 +252,7 @@ function toAnalysis(value: unknown, createdAt: string): Analysis | null {
   };
 }
 
-const CHANGE_KINDS: ProposedChange["kind"][] = ["stammdaten", "kontakt", "geschaeftszahlen", "profil_fakt_aendern", "profil_fakt_loeschen"];
+const CHANGE_KINDS: ProposedChange["kind"][] = ["stammdaten", "kontakt", "geschaeftszahlen", "profil_fakt_aendern", "profil_fakt_loeschen", "profil_fakt_neu", "notiz_neu"];
 
 function cellValue(value: unknown): string | number | null {
   return typeof value === "number" || typeof value === "string" ? value : null;

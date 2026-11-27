@@ -86,6 +86,8 @@ def _fakt_finden(nr: int, schluessel: str) -> dict[str, Any] | None:
 
 def _aktuell(conn: sqlite3.Connection, v: dict[str, Any], item: dict[str, Any]) -> Any:
     art, feld = item["art"], item.get("feld")
+    if art in ("profil_fakt_neu", "notiz_neu"):
+        return None  # neu angelegt – es gibt keinen bisherigen Wert, also auch keinen Konflikt
     if art == "stammdaten":
         wert = v.get(feld)
         return ", ".join(wert) if isinstance(wert, list) else _als_text(wert)
@@ -177,6 +179,94 @@ def vorschlag_bauen(conn: sqlite3.Connection, nr: int, begruendung: str,
     return an_modell, vorschlag
 
 
+# --------------------------------------------------------------------------- Neue Infos (Profil, Notiz)
+
+NEU_ARTEN = ("profil_fakt_neu", "notiz_neu")
+_GRUPPEN_LABEL = {"partner": "Gesprächsinhalt", "business": "Geschäftliches", "next-step": "Nächster Schritt"}
+
+
+def profil_kategorie(label: str, wert: str) -> str:
+    l = label.lower()
+    for slug, text in obsidian.PROFIL_KATEGORIEN.items():
+        if l == text.lower() or l == slug or l.split(" ")[0] in text.lower():
+            return slug
+    return obsidian.kategorie_erkennen(f"{label} {wert}")
+
+
+def neue_daten_vorschlag(conn: sqlite3.Connection, nr: int,
+                         angaben: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """`im_obsidian_speichern` im Chat: neue Profil-Infos/Notizen als Vorschlag statt sofort speichern."""
+    v = db.get_vermittler_full(conn, nr)
+    if v is None:
+        return {"fehler": f"Vermittler {nr} nicht gefunden – kein Vorschlag erstellt."}, None
+    vorhandene = {f["text"].lower() for f in obsidian.read_profil(nr)["fakten"]}
+    items: list[dict[str, Any]] = []
+    hinweise: list[str] = []
+    for angabe in angaben:
+        gruppe, label, wert = str(angabe.get("gruppe", "")), str(angabe.get("label", "")).strip(), str(angabe.get("wert", "")).strip()
+        if not wert:
+            continue
+        if gruppe == "persoenlich":
+            if wert.lower() in vorhandene:
+                hinweise.append(f"'{wert}' steht schon im Profil")
+                continue
+            kategorie = profil_kategorie(label, wert)
+            items.append({"art": "profil_fakt_neu", "bereich": "Persönliches Profil", "kategorie": kategorie,
+                          "label": obsidian.PROFIL_KATEGORIEN.get(kategorie, "Sonstiges"), "alt": None, "neu": wert,
+                          "angabe": {"gruppe": gruppe, "label": label, "wert": wert, "quelle": angabe.get("quelle") or "Chat"}})
+        else:
+            items.append({"art": "notiz_neu", "bereich": "Neue Notiz",
+                          "label": _GRUPPEN_LABEL.get(gruppe, "Notiz") + (f" · {label}" if label else ""),
+                          "alt": None, "neu": wert,
+                          "angabe": {"gruppe": gruppe, "label": label, "wert": wert, "quelle": angabe.get("quelle") or "Chat"}})
+    if not items:
+        return {"fehler": "Kein Vorschlag erstellt.", "details": hinweise}, None
+    vorschlag = {"vermittler_nr": nr, "vermittler": v["anzeigename"], "begruendung": "Neue Infos aus dem Chat",
+                 "aenderungen": items}
+    return {
+        "status": "Vorschlag erstellt – NICHT gespeichert. Der Nutzer muss ihn im Tab 'Aenderungen' bestaetigen.",
+        "vorgeschlagen": [{"ziel": i["bereich"], "feld": i["label"], "neu": i["neu"]} for i in items],
+        "nicht_uebernommen": hinweise,
+    }, vorschlag
+
+
+def obsidian_speichern(conn: sqlite3.Connection, nr: int, angaben: list[dict[str, Any]]
+                       ) -> tuple[dict[str, Any], int | None, list[dict[str, str]], str | None]:
+    """Schreibt Angaben ins Obsidian-Netz (Profil bzw. Notiz). Wird erst nach der Bestaetigung aufgerufen."""
+    v = db.get_vermittler_full(conn, nr)
+    if v is None:
+        return {"fehler": "Vermittler nicht gefunden – nichts gespeichert"}, None, [], None
+    findings: list[dict[str, str]] = []
+    gespeichert: list[dict[str, Any]] = []
+    notiz: list[dict[str, Any]] = []
+    for index, item in enumerate(angaben, start=1):
+        gruppe, label, wert = str(item["gruppe"]), str(item["label"]).strip(), str(item["wert"]).strip()
+        if not wert:
+            continue
+        if gruppe == "persoenlich":
+            fakt = obsidian.add_profil_fakt(v, wert, profil_kategorie(label, wert))
+            gespeichert.append({"ziel": f"Persoenliches Profil / {fakt['kategorie_label']}", "info": wert,
+                                "uri": obsidian.read_profil(nr)["uri"]})
+        else:
+            notiz.append(item)
+        findings.append({"id": f"saved-{index}", "group": gruppe, "label": label, "value": wert,
+                         "source": str(item.get("quelle") or "Chat"), "status": "confirmed"})
+    if notiz:
+        inhalt = [f"- **{i['label']}:** {i['wert']}" for i in notiz if i["gruppe"] != "next-step"]
+        massnahmen = [{"beschreibung": str(i["wert"])} for i in notiz if i["gruppe"] == "next-step"]
+        res = obsidian.add_entry(v, {
+            "typ": "notiz", "titel": "Aus dem Chat", "inhalt": "\n".join(inhalt) or "Vereinbarte nächste Schritte.",
+            "massnahmen": massnahmen, "tags": ["chat"], "autor": "copilot", "quelle": "chat",
+        })
+        conn.execute(
+            "INSERT INTO obsidian_eintrag (vermittler_nr, typ, titel, datum, datei, autor, quelle) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (nr, res["typ"], res["titel"], res["datum"], res["datei"], "copilot", "chat"),
+        )
+        gespeichert.append({"ziel": "Notiz", "titel": res["titel"], "uri": res["uri"]})
+    return ({"status": "gespeichert", "gespeichert": gespeichert, "akte_link": obsidian.reference(nr)["uri"]},
+            nr, findings, "Obsidian")
+
+
 def ausfuehren(conn: sqlite3.Connection, vorschlag: dict[str, Any]) -> dict[str, Any]:
     """Fuehrt einen bestaetigten Vorschlag aus. Wirft AenderungsKonflikt, wenn sich Werte geaendert haben."""
     nr = int(vorschlag["vermittler_nr"])
@@ -216,11 +306,14 @@ def ausfuehren(conn: sqlite3.Connection, vorschlag: dict[str, Any]) -> dict[str,
 
     # Dateien erst nach den DB-Aenderungen (bei einem Fehler rollt get_conn die DB zurueck)
     v_neu = db.get_vermittler_full(conn, nr)
-    for i in (i for i in items if i["art"].startswith("profil_fakt")):
+    for i in (i for i in items if i["art"] in ("profil_fakt_aendern", "profil_fakt_loeschen")):
         obsidian.delete_profil_fakt(nr, i["fakt_id"])
         if i["art"] == "profil_fakt_aendern":
             obsidian.add_profil_fakt(v_neu, i["neu"], i["kategorie"])
-    obsidian.sync_hub(v_neu)
+    neue_angaben = [i["angabe"] for i in items if i["art"] in NEU_ARTEN]
+    if neue_angaben:  # neue Profil-Infos und Notizen aus dem Chat
+        obsidian_speichern(conn, nr, neue_angaben)
+    obsidian.sync_hub(db.get_vermittler_full(conn, nr))
 
     def fmt(wert: Any) -> str:
         return "–" if wert in (None, "") else str(wert)

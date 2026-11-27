@@ -3,7 +3,8 @@
 Stufen:
   smalltalk  "Hallo", "Danke", "Guten Morgen"           -> schnelles Modell, kaum Nachdenken, kein Analyse-Agent
   analyse    "Top 10 nach Volumen", "Vergleich Nord/Sued" -> Standardmodell, Analyse-Agent parallel
-  aendern    "Aendere die E-Mail von ..."                 -> Standardmodell, sorgfaeltiger (Vorschlag muss stimmen)
+  aendern    "Aendere die E-Mail von ...", "Fuege Jagen als Interesse hinzu", "Weber hat einen Hund"
+                                                          -> Standardmodell, sorgfaeltiger (Vorschlag muss stimmen)
   standard   alles andere (Partnerakte, Notizen, Fragen)  -> Standardmodell, wenig Nachdenken
 
 Modelle per Umgebungsvariable:
@@ -38,7 +39,9 @@ _ANALYSE = re.compile(
 _AENDERN = re.compile(
     r"\b(änder\w*|aender\w*|korrigier\w*|aktualisier\w*|update|berichtig\w*|ersetz\w*|"
     r"lösch\w*|loesch\w*|entfern\w*|setz\w* .* (auf|zu)|trag\w* .* ein|neue (e-?mail|adresse|telefon\w*|nummer)|"
-    r"stimmt nicht|ist falsch|falsch hinterlegt)\b",
+    r"stimmt nicht|ist falsch|falsch hinterlegt|"
+    r"hinzufüg\w*|hinzu|ergänz\w*|ergaenz\w*|eintrag\w*|notier\w*|vermerk\w*|speicher\w*|merk dir|"
+    r"hat (einen|eine|ein|zwei|drei)\b|war (gerade |im |in |auf )|plant\b)\b",
     re.IGNORECASE,
 )
 

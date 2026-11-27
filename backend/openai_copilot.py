@@ -53,14 +53,20 @@ oder Kennzahlen immer die bereitgestellten Tools. Erfinde keine Daten, Namen ode
   → `### Offene Punkte` → Links.
 - Gespraechsvorbereitung: Kernaussage → `### Gespraechseinstieg` (1–2 persoenliche Anknuepfungspunkte
   aus dem Profil) → `### Zahlen & Entwicklung` → `### Offene Punkte & Ziele fuer das Gespraech` → Links.
-- Nach dem Speichern: ein Satz "Gespeichert:" + kurze Liste, was wo abgelegt wurde, + Link.
+- Nach einem Vorschlag: ein Satz "Zur Bestaetigung vorbereitet:" + kurze Liste, was wohin soll, + Hinweis,
+  dass es erst nach Klick auf "Bestaetigen" im Tab "Aenderungen" gespeichert ist. Schreibe NIE "Gespeichert".
 
-Speichern: Nennt der Nutzer neue Informationen zu einem eindeutig identifizierten
-Vermittler (Gespraechsinhalte, Vereinbarungen, naechste Schritte, Persoenliches),
-rufe sofort `im_obsidian_speichern` auf – ohne Rueckfrage und ohne Bestaetigung.
-Sage danach kurz, was gespeichert wurde. Nur wenn unklar ist, welcher Vermittler
-gemeint ist (kein oder mehrere Treffer), frage vorher nach (bei mehreren: `auswahl_anbieten`). Speichere nur, was der
-Nutzer tatsaechlich gesagt hat, und nichts doppelt, was schon in der Akte steht.
+Speichern: Du speicherst NIE direkt. Jedes Schreiben – neue Infos genauso wie Korrekturen – wird
+nur VORGESCHLAGEN und erst gespeichert, wenn der Nutzer es im Tab "Aenderungen" bestaetigt.
+Nennt der Nutzer neue Informationen zu einem eindeutig identifizierten Vermittler (Gespraechsinhalte,
+Vereinbarungen, naechste Schritte, Persoenliches), rufe `im_obsidian_speichern` auf – das erstellt
+den Vorschlag. Nur wenn unklar ist, welcher Vermittler gemeint ist (kein oder mehrere Treffer), frage
+vorher nach (bei mehreren: `auswahl_anbieten`). Schlage nur vor, was der Nutzer tatsaechlich gesagt
+hat, und nichts doppelt, was schon in der Akte steht.
+Interessen: Sagt der Nutzer "Interesse", "Interessen" oder "Hobbys" eines Vermittlers ergaenzen/hinzufuegen,
+ist das Feld `interessen` der Stammdaten gemeint: `aenderung_vorschlagen` mit art stammdaten, feld interessen,
+wert = bisherige Interessen + neue (kommagetrennt). Ausfuehrlichere private Infos ("spielt jeden Sonntag
+Tennis im Verein") gehoeren dagegen ins persoenliche Profil (`im_obsidian_speichern`, gruppe persoenlich).
 
 Aendern (Stammdaten, Kontaktdaten, Interessen/Hobbys, Status, Geschaeftszahlen, bestehende Profil-Fakten
 korrigieren oder loeschen): Das darfst du – aber NIE direkt. Rufe `aenderung_vorschlagen` mit ALLEN
@@ -69,7 +75,7 @@ vorher `hole_partnerakte`. Der Nutzer sieht den Vorschlag als Liste alt → neu 
 bestaetigt ihn dort per Klick. Schreibe danach kurz, was du vorgeschlagen hast, und dass es erst nach
 dem Bestaetigen im Tab "Aenderungen" gespeichert ist. Behaupte NIE, etwas sei bereits geaendert.
 Werden Felder abgelehnt (`nicht_uebernommen`), sage dem Nutzer warum. Neue Infos (nicht Korrekturen)
-speicherst du weiterhin mit `im_obsidian_speichern`.
+schlaegst du mit `im_obsidian_speichern` vor; beide Werkzeuge landen im selben Tab "Aenderungen".
 
 Gruppen beim Speichern:
 - "persoenlich": Privates fuer das persoenliche Profil (z. B. "war gerade auf
@@ -264,8 +270,9 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "im_obsidian_speichern",
-        "description": ("Speichert Angaben sofort im Obsidian-Netz des Vermittlers: 'persoenlich' ins persoenliche "
-                        "Profil, alles andere als Notiz-Eintrag (next-step als Massnahme). Keine Rueckfrage noetig."),
+        "description": ("Schlaegt neue Angaben fuer das Obsidian-Netz des Vermittlers vor: 'persoenlich' ins persoenliche "
+                        "Profil, alles andere als Notiz-Eintrag (next-step als Massnahme). Speichert NICHTS direkt – "
+                        "der Nutzer bestaetigt den Vorschlag im Tab 'Aenderungen'."),
         "strict": True,
         "parameters": {
             "type": "object",
@@ -610,50 +617,23 @@ def _datenbank_fallback(conn: sqlite3.Connection, message: str) -> CopilotReply:
     )
 
 
-def _profil_kategorie(label: str, wert: str) -> str:
-    l = label.lower()
-    for slug, text in obsidian.PROFIL_KATEGORIEN.items():
-        if l == text.lower() or l == slug or l.split(" ")[0] in text.lower():
-            return slug
-    return obsidian.kategorie_erkennen(f"{label} {wert}")
+def _vorschlag_zusammenfuehren(vorschlaege: list[dict[str, Any]], neu: dict[str, Any]) -> list[dict[str, Any]]:
+    """Mehrere Vorschlaege zum selben Vermittler in einer Antwort -> EINE Karte zum Bestaetigen."""
+    vorhanden = next((v for v in vorschlaege if v["vermittler_nr"] == neu["vermittler_nr"]), None)
+    if vorhanden is None:
+        return [*vorschlaege, neu]
+    schluessel = lambda i: (i["art"], i.get("feld"), i.get("jahr"), i.get("fakt_id"), i.get("kategorie"), i["neu"])  # noqa: E731
+    bekannt = {schluessel(i) for i in vorhanden["aenderungen"]}
+    vorhanden["aenderungen"] += [i for i in neu["aenderungen"] if schluessel(i) not in bekannt]
+    if neu.get("begruendung") and neu["begruendung"] not in vorhanden.get("begruendung", ""):
+        vorhanden["begruendung"] = " · ".join(filter(None, [vorhanden.get("begruendung"), neu["begruendung"]]))
+    return vorschlaege
 
 
-def _im_obsidian_speichern(conn: sqlite3.Connection, nr: int, angaben: list[dict[str, Any]]
-                           ) -> tuple[dict[str, Any], int | None, list[dict[str, str]], str | None]:
-    """Schreibt Angaben direkt ins Obsidian-Netz (Profil bzw. Notiz) und liefert sie als gespeicherte Findings."""
-    v = db.get_vermittler_full(conn, nr)
-    if v is None:
-        return {"fehler": "Vermittler nicht gefunden – nichts gespeichert"}, None, [], None
-    findings: list[dict[str, str]] = []
-    gespeichert: list[str] = []
-    notiz: list[dict[str, Any]] = []
-    for index, item in enumerate(angaben, start=1):
-        gruppe, label, wert = str(item["gruppe"]), str(item["label"]).strip(), str(item["wert"]).strip()
-        if not wert:
-            continue
-        if gruppe == "persoenlich":
-            fakt = obsidian.add_profil_fakt(v, wert, _profil_kategorie(label, wert))
-            gespeichert.append({"ziel": f"Persoenliches Profil / {fakt['kategorie_label']}", "info": wert,
-                                "uri": obsidian.read_profil(nr)["uri"]})
-        else:
-            notiz.append(item)
-        findings.append({"id": f"saved-{index}", "group": gruppe, "label": label, "value": wert,
-                         "source": str(item.get("quelle") or "Chat"), "status": "confirmed"})
-    if notiz:
-        inhalt = [f"- **{i['label']}:** {i['wert']}" for i in notiz if i["gruppe"] != "next-step"]
-        massnahmen = [{"beschreibung": str(i["wert"])} for i in notiz if i["gruppe"] == "next-step"]
-        res = obsidian.add_entry(v, {
-            "typ": "notiz", "titel": "Aus dem Chat", "inhalt": "\n".join(inhalt) or "Vereinbarte nächste Schritte.",
-            "massnahmen": massnahmen, "tags": ["chat"], "autor": "copilot", "quelle": "chat",
-        })
-        conn.execute(
-            "INSERT INTO obsidian_eintrag (vermittler_nr, typ, titel, datum, datei, autor, quelle) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (nr, res["typ"], res["titel"], res["datum"], res["datei"], "copilot", "chat"),
-        )
-        gespeichert.append({"ziel": "Notiz", "titel": res["titel"], "uri": res["uri"]})
-    logger.info("Copilot hat fuer VM-%s gespeichert: %s", nr, gespeichert)
-    return ({"status": "gespeichert", "gespeichert": gespeichert, "akte_link": obsidian.reference(nr)["uri"]},
-            nr, findings, "Obsidian")
+# Das eigentliche Schreiben ins Obsidian-Netz liegt in aenderungen.py: Im Chat erstellt
+# `im_obsidian_speichern` nur noch einen Vorschlag; geschrieben wird erst nach Klick auf "Bestaetigen".
+_profil_kategorie = aenderungen.profil_kategorie
+_im_obsidian_speichern = aenderungen.obsidian_speichern
 
 
 def _execute_tool(conn: sqlite3.Connection, name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any], int | None, list[dict[str, str]], str | None]:
@@ -782,11 +762,17 @@ def antwort_auf_nachricht(conn: sqlite3.Connection, history: list[dict[str, str]
                         if analyse:
                             analysen.append(analyse)
                         nr, proposed, source = None, [], "SQL-Analyse"
-                    elif call.name == "aenderung_vorschlagen":
+                    elif call.name in ("aenderung_vorschlagen", "im_obsidian_speichern"):
+                        # Jedes Schreiben (Aendern UND Neues hinzufuegen) wird nur vorgeschlagen und erst nach
+                        # Klick auf "Bestaetigen" im Tab "Aenderungen" ausgefuehrt.
                         nr = int(arguments["vermittler_nr"])
-                        output, vorschlag = aenderungen.vorschlag_bauen(conn, nr, str(arguments.get("begruendung") or ""), list(arguments["aenderungen"]))
+                        if call.name == "aenderung_vorschlagen":
+                            output, vorschlag = aenderungen.vorschlag_bauen(
+                                conn, nr, str(arguments.get("begruendung") or ""), list(arguments["aenderungen"]))
+                        else:
+                            output, vorschlag = aenderungen.neue_daten_vorschlag(conn, nr, list(arguments["angaben"]))
                         if vorschlag:
-                            vorschlaege = [x for x in vorschlaege if x["vermittler_nr"] != nr] + [vorschlag]
+                            vorschlaege = _vorschlag_zusammenfuehren(vorschlaege, vorschlag)
                         nr = nr if vorschlag else None
                         proposed, source = [], "Aenderungsvorschlag"
                     elif call.name == "auswahl_anbieten":

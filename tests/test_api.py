@@ -554,6 +554,38 @@ def test_copilot_speichert_direkt_im_obsidian(client):
     assert ["copilot"] in rows["zeilen"]
 
 
+class _FakeNeueInfoOpenAI(_FakeOpenAI):
+    """Chat-Agent will eine neue Profil-Info und eine Notiz speichern – es darf nur ein Vorschlag entstehen."""
+
+    def create(self, model, instructions, tools, input, **_):
+        if not any(isinstance(i, dict) and i.get("type") == "function_call_output" for i in input):
+            return _FakeResponse([_FakeCall("im_obsidian_speichern", {"vermittler_nr": 4251, "angaben": [
+                {"gruppe": "persoenlich", "label": "Haustiere", "wert": "Hat einen Hund namens Tim", "quelle": "Chat"},
+                {"gruppe": "next-step", "label": "Aufgabe", "wert": "Konditionen schicken", "quelle": "Chat"},
+            ]}, "c1")])
+        return _FakeResponse(text="Zur Bestätigung vorbereitet.")
+
+
+def test_neue_infos_werden_erst_nach_bestaetigung_gespeichert(client, monkeypatch):
+    import openai
+
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    monkeypatch.setattr(openai, "OpenAI", _FakeNeueInfoOpenAI)
+    chat_id = client.post("/api/chat/conversations", json={"titel": "t"}, headers=BROWSER_A).json()["id"]
+    r = client.post(f"/api/chat/conversations/{chat_id}/messages",
+                    json={"inhalt": "Herr Baumann hat einen Hund namens Tim, ich schicke ihm die Konditionen"},
+                    headers=BROWSER_A)
+    [vorschlag] = r.json()["aenderungsvorschlaege"]
+    assert [(a["art"], a["alt"], a["neu"]) for a in vorschlag["aenderungen"]] == [
+        ("profil_fakt_neu", None, "Hat einen Hund namens Tim"), ("notiz_neu", None, "Konditionen schicken")]
+    assert client.get("/api/vermittler/4251/profil").json()["fakten"] == []  # noch nichts gespeichert
+
+    assert client.post(f"/api/chat/aenderungen/{vorschlag['id']}/bestaetigen", headers=BROWSER_A).status_code == 200
+    assert [f["text"] for f in client.get("/api/vermittler/4251/profil").json()["fakten"]] == ["Hat einen Hund namens Tim"]
+    notizen = client.get("/api/vermittler/4251/obsidian/inhalt").json()["eintraege"]
+    assert any("- [ ] Konditionen schicken" in e["inhalt"] for e in notizen)
+
+
 def test_copilot_speichert_nichts_bei_unbekanntem_vermittler(client):
     from backend import db, openai_copilot
     conn = db.connect()

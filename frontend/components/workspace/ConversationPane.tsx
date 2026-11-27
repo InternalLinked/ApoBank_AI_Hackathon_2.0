@@ -50,6 +50,10 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
     [messages, proposalStatus],
   );
   const openProposals = proposals.filter((p) => p.status === "offen").length;
+  const hasAnalyses = analyses.length > 0;
+  const hasProposals = proposals.length > 0;
+  // Ein leerer Tab wird nicht angezeigt – war er gewählt (z. B. nach Chatwechsel), zeigen wir den Chat
+  const activeTab: PaneTab = (tab === "analyse" && !hasAnalyses) || (tab === "aenderungen" && !hasProposals) ? "chat" : tab;
 
   async function decide(proposal: ChangeProposal, confirm: boolean) {
     const ok = await (confirm ? onConfirmProposal(proposal) : onRejectProposal(proposal));
@@ -62,8 +66,8 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
   }
 
   useEffect(() => {
-    if (tab === "chat") bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, tab]);
+    if (activeTab === "chat") bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length, activeTab]);
 
   // Anderer Chat gewählt → zurück zum Chat-Tab
   useEffect(() => {
@@ -109,23 +113,30 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
         <div className="heading-copy"><span>CHAT · {partner ? `PARTNERAKTE ${partner.partnerId}` : "PARTNERVERTRIEB"}</span><h1>{conversation?.title ?? "Neue Unterhaltung"}</h1></div>
       </section>
 
-      <div className="pane-tabs" role="tablist" aria-label="Ansicht">
-        <button type="button" role="tab" id="tab-chat" aria-controls="panel-chat" aria-selected={tab === "chat"} className={tab === "chat" ? "is-active" : ""} onClick={() => setTab("chat")}>
-          <Icon name="chat" size={14} /> Chat
-        </button>
-        <button type="button" role="tab" id="tab-analyse" aria-controls="panel-analyse" aria-selected={tab === "analyse"} className={tab === "analyse" ? "is-active" : ""} onClick={() => setTab("analyse")}>
-          <Icon name="filter" size={14} /> Analyse{analyses.length > 0 && <span className="pane-tab-count">{analyses.length}</span>}
-        </button>
-        <button type="button" role="tab" id="tab-aenderungen" aria-controls="panel-aenderungen" aria-selected={tab === "aenderungen"} className={tab === "aenderungen" ? "is-active" : ""} onClick={() => setTab("aenderungen")}>
-          <Icon name="note" size={14} /> Änderungen{openProposals > 0 && <span className="pane-tab-count is-alert" aria-label={`${openProposals} offen`}>{openProposals}</span>}
-        </button>
-      </div>
+      {/* Tabs nur, wenn es neben dem Chat etwas zu zeigen gibt */}
+      {(hasAnalyses || hasProposals) && (
+        <div className="pane-tabs" role="tablist" aria-label="Ansicht">
+          <button type="button" role="tab" id="tab-chat" aria-controls="panel-chat" aria-selected={activeTab === "chat"} className={activeTab === "chat" ? "is-active" : ""} onClick={() => setTab("chat")}>
+            <Icon name="chat" size={14} /> Chat
+          </button>
+          {hasAnalyses && (
+            <button type="button" role="tab" id="tab-analyse" aria-controls="panel-analyse" aria-selected={activeTab === "analyse"} className={activeTab === "analyse" ? "is-active" : ""} onClick={() => setTab("analyse")}>
+              <Icon name="filter" size={14} /> Analyse<span className="pane-tab-count">{analyses.length}</span>
+            </button>
+          )}
+          {hasProposals && (
+            <button type="button" role="tab" id="tab-aenderungen" aria-controls="panel-aenderungen" aria-selected={activeTab === "aenderungen"} className={activeTab === "aenderungen" ? "is-active" : ""} onClick={() => setTab("aenderungen")}>
+              <Icon name="note" size={14} /> Änderungen{openProposals > 0 && <span className="pane-tab-count is-alert" aria-label={`${openProposals} offen`}>{openProposals}</span>}
+            </button>
+          )}
+        </div>
+      )}
 
-      {tab === "aenderungen" ? (
+      {activeTab === "aenderungen" ? (
         <section className="pane-tab-panel" role="tabpanel" id="panel-aenderungen" aria-labelledby="tab-aenderungen">
           <ChangesPanel proposals={proposals} focusedId={focusedProposalId} onConfirm={(p) => decide(p, true)} onReject={(p) => decide(p, false)} onBackToChat={() => setTab("chat")} />
         </section>
-      ) : tab === "analyse" ? (
+      ) : activeTab === "analyse" ? (
         <section className="pane-tab-panel" role="tabpanel" id="panel-analyse" aria-labelledby="tab-analyse">
           <AnalysisPanel analyses={analyses} focusedId={focusedAnalysisId} onBackToChat={() => setTab("chat")} />
         </section>
