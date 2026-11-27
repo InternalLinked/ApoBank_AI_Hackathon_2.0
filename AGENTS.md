@@ -47,7 +47,7 @@ ApoBank_AI_Hackathon_2.0/
 │   └── main.py           FastAPI-App mit allen Endpunkten
 ├── tests/test_api.py     pytest, läuft auf temporärer DB + temporärem Vault
 ├── data/
-│   ├── Musterliste_apoBank.xlsx   Quelldaten (synthetisch, 1.001 Vermittler; NICHT im Repo – manuell ablegen)
+│   ├── Musterliste_apoBank.xlsx   Quelldaten (synthetische Testdaten, 1.001 Vermittler; im Repo enthalten)
 │   └── apobank.db                 generiert (gitignored)
 ├── vault/                Obsidian-Vault, generiert (gitignored)
 ├── requirements.txt

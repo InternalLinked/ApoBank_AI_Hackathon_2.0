@@ -7,7 +7,7 @@ bekommt ein eigenes **Obsidian-„Gehirn“**, in das über die API Wissen gesch
 
 ## Setup
 
-`Musterliste_apoBank.xlsx` (Hackathon-Daten, nicht im Repo) nach `data/` kopieren, dann:
+`data/Musterliste_apoBank.xlsx` (synthetische Testdaten) ist im Repo enthalten, dann:
 
 ```powershell
 python -m venv .venv

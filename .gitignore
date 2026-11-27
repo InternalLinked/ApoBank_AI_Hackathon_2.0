@@ -10,8 +10,9 @@ data/uploads/
 # Generierter Obsidian-Vault (Laufzeitdaten)
 vault/
 
-# Quelldaten des Hackathons nicht ins (oeffentliche) Repo
+# Weitere Excel-Dateien nicht ins (oeffentliche) Repo; die synthetische Musterliste ist versioniert
 data/*.xlsx
+!data/Musterliste_apoBank.xlsx
 
 # Lokale Konfiguration und Zugangsdaten nie committen (Repo ist oeffentlich)
 .env
