@@ -34,15 +34,37 @@ ROWS = [
 ]
 
 
-def test_chat_loeschen(client):
-    chat_id = client.post("/api/chat/conversations", json={"titel": "Test"}).json()["id"]
-    andere_id = client.post("/api/chat/conversations", json={"titel": "Bleibt"}).json()["id"]
+BROWSER_A = {"X-Client-ID": "browser-a-0000000000000001"}
+BROWSER_B = {"X-Client-ID": "browser-b-0000000000000002"}
 
-    assert client.delete(f"/api/chat/conversations/{chat_id}").status_code == 204
-    workspace = client.get("/api/chat/workspace").json()
+
+def test_chat_loeschen(client):
+    chat_id = client.post("/api/chat/conversations", json={"titel": "Test"}, headers=BROWSER_A).json()["id"]
+    andere_id = client.post("/api/chat/conversations", json={"titel": "Bleibt"}, headers=BROWSER_A).json()["id"]
+
+    assert client.delete(f"/api/chat/conversations/{chat_id}", headers=BROWSER_A).status_code == 204
+    workspace = client.get("/api/chat/workspace", headers=BROWSER_A).json()
     assert [c["id"] for c in workspace["conversations"]] == [andere_id]
     assert chat_id not in workspace["messages_by_conversation"]
-    assert client.delete(f"/api/chat/conversations/{chat_id}").status_code == 404
+    assert client.delete(f"/api/chat/conversations/{chat_id}", headers=BROWSER_A).status_code == 404
+
+
+def test_chats_sind_pro_browser_getrennt(client):
+    chat_a = client.post("/api/chat/conversations", json={"titel": "Von A"}, headers=BROWSER_A).json()["id"]
+    chat_b = client.post("/api/chat/conversations", json={"titel": "Von B"}, headers=BROWSER_B).json()["id"]
+
+    assert [c["id"] for c in client.get("/api/chat/workspace", headers=BROWSER_A).json()["conversations"]] == [chat_a]
+    assert [c["id"] for c in client.get("/api/chat/workspace", headers=BROWSER_B).json()["conversations"]] == [chat_b]
+
+    # Fremde Chats: weder schreiben noch loeschen, und 404 statt 403 (Existenz wird nicht verraten)
+    assert client.post(f"/api/chat/conversations/{chat_a}/messages", json={"inhalt": "hi"},
+                       headers=BROWSER_B).status_code == 404
+    assert client.delete(f"/api/chat/conversations/{chat_a}", headers=BROWSER_B).status_code == 404
+    assert client.get("/api/chat/workspace", headers=BROWSER_A).json()["conversations"][0]["id"] == chat_a
+
+    for headers in ({}, {"X-Client-ID": "zu-kurz"}, {"X-Client-ID": "x" * 16 + "' OR 1=1"}):
+        r = client.get("/api/chat/workspace", headers=headers)
+        assert r.status_code == 400 and r.json()["fehler_code"] == "UNGUELTIGE_ANFRAGE"
 
 
 def test_fehlerformat_mit_code_und_request_id(client):
@@ -52,7 +74,7 @@ def test_fehlerformat_mit_code_und_request_id(client):
     assert body["fehler_code"] == "NICHT_GEFUNDEN" and body["detail"]
     assert body["request_id"] and r.headers["X-Request-ID"] == body["request_id"]
 
-    r = client.post("/api/chat/conversations", json={"titel": ""})
+    r = client.post("/api/chat/conversations", json={"titel": ""}, headers=BROWSER_A)
     body = r.json()
     assert r.status_code == 422 and body["fehler_code"] == "VALIDIERUNG"
     assert isinstance(body["detail"], list) and "titel" in body["meldung"]

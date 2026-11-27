@@ -28,9 +28,19 @@ def init_db() -> None:
     conn = connect()
     try:
         conn.executescript(SCHEMA_SQL)
+        _add_missing_columns(conn)
         conn.commit()
     finally:
         conn.close()
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    """Rein additive Spalten nachruesten, damit bestehende DBs kein --reset (Datenverlust) brauchen."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(chat_konversation)")}
+    if "client_id" not in columns:
+        conn.execute("ALTER TABLE chat_konversation ADD COLUMN client_id TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_konversation_client "
+                 "ON chat_konversation(client_id, aktualisiert_am)")
 
 
 def get_conn() -> Iterator[sqlite3.Connection]:

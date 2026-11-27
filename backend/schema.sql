@@ -90,7 +90,10 @@ CREATE TABLE IF NOT EXISTS chat_konversation (
     titel           TEXT NOT NULL DEFAULT 'Neue Unterhaltung',
     vermittler_nr   INTEGER REFERENCES vermittler(vermittler_nr) ON DELETE SET NULL,
     erstellt_am     TEXT NOT NULL DEFAULT (datetime('now')),
-    aktualisiert_am TEXT NOT NULL DEFAULT (datetime('now'))
+    aktualisiert_am TEXT NOT NULL DEFAULT (datetime('now')),
+    -- Zufaellige ID des Browsers (Header X-Client-ID). Trennt nur die Ansicht, ist KEINE Authentifizierung.
+    -- Bestehende DBs ergaenzt db.init_db; Altchats ohne client_id sind fuer niemanden sichtbar.
+    client_id       TEXT
 );
 
 CREATE TABLE IF NOT EXISTS chat_nachricht (

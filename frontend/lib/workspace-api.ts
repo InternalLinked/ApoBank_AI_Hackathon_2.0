@@ -62,6 +62,34 @@ function detailText(data: ApiRecord): string | null {
   return null;
 }
 
+const CLIENT_ID_KEY = "apobank.clientId";
+let cachedClientId: string | null = null;
+
+function randomId(): string {
+  // crypto.randomUUID gibt es nur in sicheren Kontexten (HTTPS/localhost); getRandomValues überall.
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Zufällige ID dieses Browsers. Das Backend zeigt nur Chats mit derselben ID.
+ * Trennt die Ansicht, ist aber KEIN Zugriffsschutz (wer die ID kennt, sieht die Chats).
+ */
+function clientId(): string {
+  if (cachedClientId) return cachedClientId;
+  try {
+    const stored = window.localStorage.getItem(CLIENT_ID_KEY);
+    if (stored && /^[A-Za-z0-9-]{16,64}$/.test(stored)) return (cachedClientId = stored);
+    const created = randomId();
+    window.localStorage.setItem(CLIENT_ID_KEY, created);
+    return (cachedClientId = created);
+  } catch {
+    // localStorage gesperrt (z. B. strikter Privatmodus): ID gilt nur bis zum Neuladen.
+    return (cachedClientId = randomId());
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const isLocalFrontend = typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname) && window.location.port === "3000";
   const apiBase = isLocalFrontend ? "http://127.0.0.1:8000/api" : "/api";
@@ -70,10 +98,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   let response: Response;
   try {
-    response = await fetch(`${apiBase}${path}`, {
-      ...init,
-      headers: init?.body instanceof FormData ? init.headers : { "Content-Type": "application/json", ...init?.headers },
-    });
+    const headers = new Headers(init?.headers);
+    headers.set("X-Client-ID", clientId());
+    // Bei FormData setzt der Browser Content-Type inkl. Boundary selbst.
+    if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+    response = await fetch(`${apiBase}${path}`, { ...init, headers });
   } catch (cause) {
     const error = new ApiError(
       `Backend nicht erreichbar (${apiBase}). Läuft der Server?`,
@@ -170,7 +199,7 @@ function toMessage(value: unknown): ChatMessage {
   const item = record(value);
   const metadata = record(item.metadata);
   return {
-    id: String(item.id ?? crypto.randomUUID()),
+    id: String(item.id ?? randomId()),
     role: item.role === "user" ? "user" : "assistant",
     content: String(item.content ?? ""),
     createdAt: dateLabel(item.created_at),

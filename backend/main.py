@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import time
 from contextlib import asynccontextmanager
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -564,11 +565,30 @@ def ueberblick(marktgebiet: str | None = None, filial_nr: int | None = None, mit
 
 # =========================================================================== Chat / OpenAI
 
-@app.get("/api/chat/workspace", tags=["Chat"], summary="Gespeicherte Chatverlaeufe fuer die Weboberflaeche")
-def get_chat_workspace(conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9-]{16,64}$")
+
+
+def client_id(x_client_id: str | None = Header(None, description="Zufaellige Browser-ID; trennt Chats pro Browser "
+                                                                  "(keine Authentifizierung)")) -> str:
+    """Chats gehoeren dem Browser, der sie angelegt hat. Ohne gueltige ID kein Zugriff auf Chats."""
+    if not x_client_id or not CLIENT_ID_RE.match(x_client_id):
+        raise HTTPException(400, "Header X-Client-ID fehlt oder ist ungueltig (16-64 Zeichen, A-Z, 0-9, -).")
+    return x_client_id
+
+
+def _eigener_chat(conn: Conn, conversation_id: str, client: str) -> sqlite3.Row:
+    row = conn.execute("SELECT id, titel FROM chat_konversation WHERE id = ? AND client_id = ?",
+                       (conversation_id, client)).fetchone()
+    if row is None:  # fremde Chats bewusst ebenfalls 404, damit ihre Existenz nicht verraten wird
+        raise HTTPException(404, "Chat nicht gefunden")
+    return row
+
+
+@app.get("/api/chat/workspace", tags=["Chat"], summary="Gespeicherte Chatverlaeufe dieses Browsers")
+def get_chat_workspace(client: str = Depends(client_id), conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
     conversations = db.rows_to_dicts(conn.execute(
-        f"SELECT {CHAT_KONVERSATION_FIELDS} FROM chat_konversation c "
-        "ORDER BY c.aktualisiert_am DESC, c.erstellt_am DESC"
+        f"SELECT {CHAT_KONVERSATION_FIELDS} FROM chat_konversation c WHERE c.client_id = ? "
+        "ORDER BY c.aktualisiert_am DESC, c.erstellt_am DESC", (client,)
     ).fetchall())
     messages: dict[str, list[dict[str, Any]]] = {}
     for conversation in conversations:
@@ -585,28 +605,29 @@ def get_chat_workspace(conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
 
 
 @app.post("/api/chat/conversations", tags=["Chat"], status_code=201, summary="Neuen Chat anlegen")
-def create_chat_conversation(body: ChatKonversationCreate, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+def create_chat_conversation(body: ChatKonversationCreate, client: str = Depends(client_id),
+                             conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
     conversation_id = str(uuid4())
-    conn.execute("INSERT INTO chat_konversation (id, titel) VALUES (?, ?)", (conversation_id, body.titel.strip()))
+    conn.execute("INSERT INTO chat_konversation (id, titel, client_id) VALUES (?, ?, ?)",
+                 (conversation_id, body.titel.strip(), client))
     return _chat_konversation(conn, conversation_id)
 
 
 @app.delete("/api/chat/conversations/{conversation_id}", tags=["Chat"], status_code=204,
             summary="Chat samt allen Nachrichten endgueltig loeschen")
-def delete_chat_conversation(conversation_id: str, conn: Conn = Depends(db.get_conn)) -> Response:
+def delete_chat_conversation(conversation_id: str, client: str = Depends(client_id),
+                             conn: Conn = Depends(db.get_conn)) -> Response:
+    _eigener_chat(conn, conversation_id, client)
     conn.execute("DELETE FROM chat_nachricht WHERE konversation_id = ?", (conversation_id,))
-    cursor = conn.execute("DELETE FROM chat_konversation WHERE id = ?", (conversation_id,))
-    if cursor.rowcount == 0:
-        raise HTTPException(404, "Chat nicht gefunden")
+    conn.execute("DELETE FROM chat_konversation WHERE id = ?", (conversation_id,))
     return Response(status_code=204)
 
 
 @app.post("/api/chat/conversations/{conversation_id}/messages", tags=["Chat"],
           summary="Nachricht speichern und ueber OpenAI mit Datenwerkzeugen beantworten")
-def send_chat_message(conversation_id: str, body: ChatNachrichtIn, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
-    conversation = conn.execute("SELECT id, titel FROM chat_konversation WHERE id = ?", (conversation_id,)).fetchone()
-    if conversation is None:
-        raise HTTPException(404, "Chat nicht gefunden")
+def send_chat_message(conversation_id: str, body: ChatNachrichtIn, client: str = Depends(client_id),
+                      conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    conversation = _eigener_chat(conn, conversation_id, client)
 
     content = body.inhalt.strip()
     conn.execute(

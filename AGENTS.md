@@ -311,7 +311,7 @@ vault/
 | 3 | Maßnahmen automatisch erkennen, Wiedervorlagen | LLM füllt `massnahmen`; offene Tasks aus Einträgen parsen, Endpunkt `GET /api/massnahmen` |
 | 4 | Besuchsvorbereitung, Potenzial-/Risikoanalyse, Next-Best-Action | Kombination aus `kontext` + `analytics`; Kriterien definieren |
 | – | Zielerreichung der Geschäftsplanung | braucht Plandaten → Tabelle `planzahlen(vermittler_nr|filial_nr, jahr, sparte, ziel_eur)` |
-| – | Authentifizierung | aktuell keine; vor jedem nicht-lokalen Betrieb ergänzen |
+| – | Authentifizierung | aktuell keine; vor jedem nicht-lokalen Betrieb ergänzen. Chats (`/api/chat/*`) sind nur per Header `X-Client-ID` (zufällige ID im `localStorage` des Browsers) getrennt – das trennt die Ansicht, schützt aber nicht. |
 | – | Löschen von Vermittlern | bewusst nicht implementiert |
 
 ---
