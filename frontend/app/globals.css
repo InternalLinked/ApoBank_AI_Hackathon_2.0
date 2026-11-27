@@ -538,3 +538,14 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 .message-markdown .md-partner-link:hover { background: #dbe8fb; }
 .message-markdown .md-partner-link:focus-visible { outline: 2px solid #5b8fd6; outline-offset: 1px; }
 .message-markdown .md-partner-link:disabled { cursor: default; }
+
+/* Chat-Liste: Löschsymbol und Uhrzeit überlappen nicht (Uhrzeit weicht beim Hover) */
+.conversation-time { transition: opacity .15s ease; }
+.conversation-row:hover .conversation-time,
+.conversation-row:focus-within .conversation-time { opacity: 0; }
+@media (hover: none) {
+  /* Touch: Symbol ist immer sichtbar -> eigenen Platz rechts reservieren, Uhrzeit bleibt daneben */
+  .conversation-item { padding-right: 38px; }
+  .conversation-row:hover .conversation-time,
+  .conversation-row:focus-within .conversation-time { opacity: 1; }
+}
