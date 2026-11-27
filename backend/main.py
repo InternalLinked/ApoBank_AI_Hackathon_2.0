@@ -24,7 +24,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import db, obsidian, openai_copilot, transcribe
+from . import db, obsidian, openai_copilot, vermittler_links, transcribe
 from .config import settings
 from .schemas import (ChatKonversationCreate, ChatNachrichtIn, EintragIn, GeschaeftszahlIn, ProfilFaktIn,
                       SqlQueryIn, VermittlerCreate, VermittlerUpdate, ZusammenfassungIn)
@@ -637,6 +637,9 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, client: str =
     ).fetchall()
     history = [{"role": row["rolle"], "content": row["inhalt"]} for row in reversed(history_rows)]
     reply = openai_copilot.antwort_auf_nachricht(conn, history)
+    # Vermittlernamen klickbar machen ([Name](partner:<nr>) -> Frontend oeffnet die Partnerakte)
+    reply.content = vermittler_links.verlinke(
+        conn, reply.content, [*reply.erwaehnte_nrs, reply.vermittler_nr, *(k.get("vermittler_nr") for k in reply.kandidaten)])
     partner = _partner_summary(db.get_vermittler_full(conn, reply.vermittler_nr)) if reply.vermittler_nr else None
     metadata = {
         "findings": reply.findings,

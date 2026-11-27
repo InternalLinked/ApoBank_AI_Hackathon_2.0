@@ -209,6 +209,9 @@ Er schreibt nur in Obsidian (+ Protokollzeile in `obsidian_eintrag`), **nie** in
 Antworten des Copilots sind **Markdown** (Frontend: `MessageMarkdown.tsx`, react-markdown + GFM-Tabellen). Links nur als
 `[Text](url)` und nur mit URLs aus Tool-Feldern (`links`, `uri`, `akte_link`); erlaubte Protokolle: http(s), mailto, tel, obsidian.
 Formatregeln stehen in `SYSTEM_INSTRUCTIONS` (`backend/openai_copilot.py`).
+Vermittlernamen werden nach der Antwort **im Backend** verlinkt (`backend/vermittler_links.py`): jeder volle Name aus der DB
+wird zu `[Name](partner:<nr>)`, ein Klick öffnet die Partnerakte. Doppelte Namen nur, wenn genau einer davon in den
+Werkzeug-Ergebnissen der Antwort vorkam; vorhandene Links, Code und URLs bleiben unangetastet.
 
 Body für `POST …/eintraege`:
 ```json

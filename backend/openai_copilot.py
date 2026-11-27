@@ -15,7 +15,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import db, obsidian
+from . import db, obsidian, vermittler_links
 from .config import settings
 
 logger = logging.getLogger("apobank.copilot")
@@ -41,6 +41,8 @@ oder Kennzahlen immer die bereitgestellten Tools. Erfinde keine Daten, Namen ode
 ## Links
 - Setze Links IMMER als Markdown-Hyperlink mit sprechendem Text: `[Obsidian-Akte von Jens Weber](obsidian://...)`,
   `[jens.weber@beispiel.de](mailto:jens.weber@beispiel.de)`. Nie nackte URLs, nie den Link-Text "hier".
+- Nenne Vermittler mit vollem Namen wie in der Akte (z. B. "Dr. Hans Baumann", nicht nur "Baumann")
+  und ohne eigenen Link: Die Oberflaeche macht jeden Vermittlernamen automatisch klickbar.
 - Verwende nur URLs, die exakt so in Tool-Ergebnissen stehen (Felder `links`, `uri`, `akte_link`).
   Erfinde oder veraendere keine URLs. E-Mail-Adressen aus der Akte als `mailto:`-Link.
 - Wenn du eine Partnerakte zeigst oder etwas gespeichert hast, verlinke am Ende die Obsidian-Akte
@@ -252,6 +254,8 @@ class CopilotReply:
     kandidaten: list[dict[str, Any]] = field(default_factory=list)
     # Ausgefuehrte SQL-Analysen fuer den Tab "Analyse": [{"id", "titel", "sql", "spalten", "zeilen", "diagramm", ...}]
     analysen: list[dict[str, Any]] = field(default_factory=list)
+    # Alle Vermittlernummern aus Werkzeug-Ergebnissen dieser Antwort (zum eindeutigen Verlinken von Namen)
+    erwaehnte_nrs: list[int] = field(default_factory=list)
 
 
 MAX_KANDIDATEN = 20
@@ -652,6 +656,7 @@ def antwort_auf_nachricht(conn: sqlite3.Connection, history: list[dict[str, str]
     kandidaten: list[dict[str, Any]] = []
     analysen: list[dict[str, Any]] = []
     letzte_suche: list[int] = []  # Treffer der letzten Vermittlersuche, fuer die Absicherung unten
+    erwaehnt: set[int] = set()
     # Spekulativ: Der Analyse-Agent startet sofort und bereitet SQL + Ergebnis vor, waehrend der
     # Chat-Agent noch nachdenkt. Braucht der Chat-Agent es, holt er es per `vorbereitete_analyse` ab.
     analyse_future: Future | None = _ANALYSE_POOL.submit(_analyse_agent, client, history)
@@ -678,10 +683,12 @@ def antwort_auf_nachricht(conn: sqlite3.Connection, history: list[dict[str, str]
                     sources=sources,
                     kandidaten=kandidaten,
                     analysen=analysen,
+                    erwaehnte_nrs=sorted(erwaehnt),
                 )
 
             input_items.extend(response.output)
             for call in calls:
+                arguments: Any = {}
                 try:
                     arguments = json.loads(call.arguments)
                     if call.name == "vorbereitete_analyse":
@@ -710,6 +717,7 @@ def antwort_auf_nachricht(conn: sqlite3.Connection, history: list[dict[str, str]
                     output, nr, proposed, source = {"fehler": f"Werkzeugparameter ungueltig: {exc}"}, None, [], None
                 if nr is not None:
                     selected_vermittler = nr
+                erwaehnt |= vermittler_links.nummern_in(output) | vermittler_links.nummern_in(arguments if isinstance(arguments, dict) else {})
                 findings.extend(proposed)
                 if source and source not in sources:
                     sources.append(source)
