@@ -30,6 +30,8 @@ export type ChatMessage = {
   analyses?: Analysis[];
   /** Änderungsvorschläge der KI – erst nach Bestätigung im Tab „Änderungen“ gespeichert. */
   proposals?: ChangeProposal[];
+  /** Automatisch gewähltes Modell, z. B. { name: "gpt-5-nano", tier: "smalltalk", seconds: 1.2 } */
+  model?: { name: string; tier: string; rounds: number; seconds: number };
 };
 
 export type ProposalStatus = "offen" | "bestaetigt" | "verworfen";

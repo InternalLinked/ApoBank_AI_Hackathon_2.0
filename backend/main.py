@@ -664,6 +664,7 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, client: str =
         "kandidaten": reply.kandidaten,  # Auswahl-Buttons bei mehreren Treffern; bleiben im Verlauf erhalten
         "analysen": reply.analysen,      # SQL + Ergebnis + Diagramm-Angaben fuer den Tab "Analyse"
         "aenderungsvorschlaege": vorschlaege,  # Tab "Aenderungen"; Status kommt beim Laden aus chat_aenderung
+        "modell": reply.modell,          # automatisch gewaehltes Modell + Dauer (Anzeige unter der Antwort)
     }
     cursor = conn.execute(
         "INSERT INTO chat_nachricht (konversation_id, rolle, inhalt, metadaten_json) VALUES (?, 'assistant', ?, ?)",
@@ -680,7 +681,7 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, client: str =
     ).fetchone()
     return {"message": _chat_message(message), "partner": partner, "findings": reply.findings,
             "openai_configured": reply.configured, "fehler": reply.fehler, "kandidaten": reply.kandidaten,
-            "analysen": reply.analysen, "aenderungsvorschlaege": vorschlaege}
+            "analysen": reply.analysen, "aenderungsvorschlaege": vorschlaege, "modell": reply.modell}
 
 
 def _eigener_vorschlag(conn: Conn, vorschlag_id: str, client: str) -> sqlite3.Row:

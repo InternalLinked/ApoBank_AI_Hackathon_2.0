@@ -32,6 +32,9 @@ function DataTable({ analysis }: { analysis: Analysis }) {
   );
 }
 
+/** SQL-Ansicht vorerst ausgeblendet – auf true setzen, um "SQL-Code anzeigen" wieder einzublenden. */
+const SQL_ANZEIGEN = false;
+
 function AnalysisCard({ analysis, focused }: { analysis: Analysis; focused: boolean }) {
   const hasChart = chartPoints(analysis) !== null;
   const [showSql, setShowSql] = useState(false);
@@ -66,9 +69,11 @@ function AnalysisCard({ analysis, focused }: { analysis: Analysis; focused: bool
       {showTable && <DataTable analysis={analysis} />}
 
       <div className="analysis-actions">
-        <button type="button" className="analysis-sql-button" aria-expanded={showSql} onClick={() => setShowSql((v) => !v)}>
-          <Icon name="file" size={14} /> {showSql ? "SQL-Code ausblenden" : "SQL-Code anzeigen"}
-        </button>
+        {SQL_ANZEIGEN && (
+          <button type="button" className="analysis-sql-button" aria-expanded={showSql} onClick={() => setShowSql((v) => !v)}>
+            <Icon name="file" size={14} /> {showSql ? "SQL-Code ausblenden" : "SQL-Code anzeigen"}
+          </button>
+        )}
         {hasChart && (
           <button type="button" className="analysis-secondary-button" aria-expanded={showTable} onClick={() => setShowTable((v) => !v)}>
             {showTable ? "Tabelle ausblenden" : "Tabelle anzeigen"}
@@ -76,7 +81,7 @@ function AnalysisCard({ analysis, focused }: { analysis: Analysis; focused: bool
         )}
       </div>
 
-      {showSql && (
+      {SQL_ANZEIGEN && showSql && (
         <div className="analysis-sql">
           <div className="analysis-sql-head">
             <span>Verwendetes SQL (read-only ausgeführt)</span>
@@ -97,7 +102,7 @@ export function AnalysisPanel({ analyses, focusedId, onBackToChat }: AnalysisPan
       <div className="analysis-empty">
         <div className="empty-orbit"><Icon name="sparkle" size={22} /></div>
         <h2>Noch keine Analyse</h2>
-        <p>Frage im Chat z. B. „Wer ist der Top-Vermittler 2025?“ – Diagramm und SQL erscheinen dann hier.</p>
+        <p>Frage im Chat z. B. „Wer ist der Top-Vermittler 2025?“ – das Diagramm erscheint dann hier.</p>
         <button type="button" className="analysis-secondary-button" onClick={onBackToChat}>Zum Chat</button>
       </div>
     );

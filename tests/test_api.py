@@ -93,7 +93,7 @@ class _FakeOpenAI:
     def __init__(self, **_):
         self.responses = self
 
-    def create(self, model, instructions, tools, input):
+    def create(self, model, instructions, tools, input, **_):
         from backend import openai_copilot
         schon_tool = any(isinstance(i, dict) and i.get("type") == "function_call_output" for i in input)
         if instructions == openai_copilot.ANALYSE_INSTRUCTIONS:
@@ -192,7 +192,7 @@ class _FakeAenderungsOpenAI(_FakeOpenAI):
         {"art": "stammdaten", "feld": "obsidian_pfad", "jahr": 0, "fakt_id": "", "wert": "../../etc"},  # nicht erlaubt
     ]
 
-    def create(self, model, instructions, tools, input):
+    def create(self, model, instructions, tools, input, **_):
         from backend import openai_copilot
         if instructions == openai_copilot.ANALYSE_INSTRUCTIONS:
             return _FakeResponse(text="KEINE")

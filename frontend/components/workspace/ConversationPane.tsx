@@ -8,6 +8,9 @@ import { VoiceButton } from "./VoiceButton";
 
 type PaneTab = "chat" | "analyse" | "aenderungen";
 
+/** Stufen der automatischen Modellwahl (backend/modellwahl.py) */
+const TIER_LABEL: Record<string, string> = { smalltalk: "schnell", analyse: "Analyse", aendern: "Änderung", standard: "Standard" };
+
 type ConversationPaneProps = {
   conversation: Conversation | undefined;
   messages: ChatMessage[];
@@ -136,7 +139,14 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
             <article className={`message-row ${message.role}`} key={message.id}>
               {message.role === "assistant" && <div className="assistant-avatar"><Icon name="sparkle" size={15} /></div>}
               <div className="message-body">
-                <div className="message-meta"><strong>{message.role === "assistant" ? "Partner-Copilot" : "Du"}</strong><span>{message.createdAt}</span></div>
+                <div className="message-meta">
+                  <strong>{message.role === "assistant" ? "Partner-Copilot" : "Du"}</strong><span>{message.createdAt}</span>
+                  {message.model && (
+                    <span className="message-model" title={`Automatisch gewählt: ${TIER_LABEL[message.model.tier] ?? message.model.tier} · ${message.model.rounds} KI-Runde(n)`}>
+                      {message.model.name} · {TIER_LABEL[message.model.tier] ?? message.model.tier} · {message.model.seconds.toLocaleString("de-DE", { maximumFractionDigits: 1 })} s
+                    </span>
+                  )}
+                </div>
                 <div className={`message-card ${message.role === "user" ? "user-message-card" : "assistant-message-card"}`}>
                   {message.role === "assistant" ? <MessageMarkdown content={message.content} /> : <p>{message.content}</p>}
                   {message.metrics && <div className="metric-grid">{message.metrics.map((metric) => <div className={`metric-card tone-${metric.tone ?? "green"}`} key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.detail}</small></div>)}</div>}

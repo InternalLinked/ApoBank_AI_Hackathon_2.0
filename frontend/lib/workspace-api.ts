@@ -289,7 +289,14 @@ function toMessage(value: unknown): ChatMessage {
   const proposals = Array.isArray(metadata.aenderungsvorschlaege)
     ? metadata.aenderungsvorschlaege.map((proposal) => toProposal(proposal, createdAt)).filter((proposal): proposal is ChangeProposal => proposal !== null)
     : [];
+  const model = record(metadata.modell);
   return {
+    model: typeof model.modell === "string" ? {
+      name: model.modell,
+      tier: String(model.stufe ?? ""),
+      rounds: typeof model.runden === "number" ? model.runden : 0,
+      seconds: typeof model.dauer_ms === "number" ? model.dauer_ms / 1000 : 0,
+    } : undefined,
     candidates: candidates.length > 0 ? candidates : undefined,
     analyses: analyses.length > 0 ? analyses : undefined,
     proposals: proposals.length > 0 ? proposals : undefined,
