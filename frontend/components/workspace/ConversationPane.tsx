@@ -176,7 +176,7 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
               {message.role === "assistant" && <div className="assistant-avatar"><Icon name="sparkle" size={15} /></div>}
               <div className="message-body">
                 <div className="message-meta">
-                  <strong>{message.role === "assistant" ? "Partner-Copilot" : "Du"}</strong><span>{message.createdAt}</span>
+                  <strong>{message.role === "assistant" ? "Aipo" : "Du"}</strong><span>{message.createdAt}</span>
                   {message.model && (
                     <span className="message-model" title={`Automatisch gewählt: ${TIER_LABEL[message.model.tier] ?? message.model.tier} · ${message.model.rounds} KI-Runde(n)`}>
                       {message.model.name} · {TIER_LABEL[message.model.tier] ?? message.model.tier} · {message.model.seconds.toLocaleString("de-DE", { maximumFractionDigits: 1 })} s
@@ -234,7 +234,7 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
               </div>
             </article>
           ))}
-          {isSending && <div className="typing-indicator"><span /><span /><span /> Copilot denkt nach …</div>}
+          {isSending && <div className="typing-indicator"><span /><span /><span /> Aipo denkt nach …</div>}
           <div ref={bottomRef} />
         </div>
       </div>
@@ -242,7 +242,7 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
       <div className="composer-wrap">
         <div className="quick-prompts"><span>Vorschläge</span><button type="button" onClick={() => onSend("Welche Punkte sollte ich im Gespräch ansprechen?")}>Gespräch vorbereiten</button><button type="button" onClick={() => onSend("Zeig mir offene Vorgänge")}>Offene Vorgänge</button><button type="button" disabled={isSending} onClick={() => onSend(STARTER_PROMPTS[0].prompt, "top10")}>Meine Top 10</button></div>
         <form className="composer" onSubmit={submit}>
-          <textarea ref={textareaRef} rows={1} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={handleKeyDown} placeholder="Frage zur Partnerakte oder schreibe eine Notiz … (oder Mikrofon nutzen)" aria-label="Nachricht an den Partner-Copilot" />
+          <textarea ref={textareaRef} rows={1} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={handleKeyDown} placeholder="Frage zur Partnerakte oder schreibe eine Notiz … (oder Mikrofon nutzen)" aria-label="Nachricht an Aipo" />
           <div className="composer-footer"><span><Icon name="sparkle" size={14} /> Antworten mit Quellenbezug</span><div className="composer-actions"><button type="button" className="composer-attach" aria-label="Datei anhängen" title="Datei anhängen"><Icon name="file" size={17} /></button><VoiceButton disabled={isSending} onTranscribe={onTranscribe} onText={insertTranscript} onError={onError} /><button type="submit" className="send-button" disabled={!value.trim() || isSending} aria-label="Nachricht senden"><Icon name="send" size={16} /></button></div></div>
         </form>
         <p className="composer-note">Angaben aus dem Chat erst prüfen und anschließend bewusst in die Partnerakte übernehmen.</p>

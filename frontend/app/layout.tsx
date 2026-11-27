@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Partner-Copilot | apoBank",
+  title: "Aipo | apoBank",
   description: "Demo-Arbeitsbereich für Partnerakten und Gespräche.",
 };
 

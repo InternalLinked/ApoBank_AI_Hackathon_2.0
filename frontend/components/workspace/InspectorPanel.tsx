@@ -152,8 +152,8 @@ export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, o
       </div>
 
       <div className="inspector-scroll">
-        <div className="section-title-row"><div><h3>Aus dem Chat gespeichert</h3><p>Der Copilot legt neue Infos direkt im Obsidian-Netz ab.</p></div><span className="source-count"><Icon name="file" size={14} />{findings.length} Angaben</span></div>
-        {findings.length === 0 ? <div className="review-note"><Icon name="sparkle" size={15} /><p>Erzähl dem Copilot von Gesprächen oder Persönlichem (z. B. „Herr Weber war gerade im Urlaub“) – er speichert es automatisch in Obsidian und listet es hier auf.</p></div> : <>
+        <div className="section-title-row"><div><h3>Aus dem Chat gespeichert</h3><p>Aipo legt neue Infos nach deiner Bestätigung im Obsidian-Netz ab.</p></div><span className="source-count"><Icon name="file" size={14} />{findings.length} Angaben</span></div>
+        {findings.length === 0 ? <div className="review-note"><Icon name="sparkle" size={15} /><p>Erzähl Aipo von Gesprächen oder Persönlichem (z. B. „Herr Weber war gerade im Urlaub“) – nach deiner Bestätigung im Tab „Änderungen“ wird es in Obsidian gespeichert.</p></div> : <>
           <div className="finding-group"><div className="finding-group-heading"><span className="group-icon"><Icon name="person" size={15} /></span><h4>Partner & Gespräch</h4></div>{findings.filter((finding) => finding.group === "partner").map((finding) => <FindingRow key={finding.id} finding={finding} />)}</div>
           <div className="finding-group"><div className="finding-group-heading"><span className="group-icon blue"><Icon name="briefcase" size={15} /></span><h4>Geschäftsdaten</h4></div>{findings.filter((finding) => finding.group === "business").map((finding) => <FindingRow key={finding.id} finding={finding} />)}</div>
           <div className="finding-group"><div className="finding-group-heading"><span className="group-icon amber"><Icon name="calendar" size={15} /></span><h4>Nächster Schritt</h4></div>{findings.filter((finding) => finding.group === "next-step").map((finding) => <FindingRow key={finding.id} finding={finding} />)}</div>
