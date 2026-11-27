@@ -6,6 +6,7 @@ Doku:   http://127.0.0.1:8000/docs   (OpenAPI: /openapi.json -> direkt als Tool-
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 from contextlib import asynccontextmanager
@@ -15,11 +16,14 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import copilot, db, obsidian
+from . import db, obsidian, openai_copilot
 from .config import settings
 from .schemas import (ChatKonversationCreate, ChatNachrichtIn, EintragIn, GeschaeftszahlIn, SqlQueryIn,
                       VermittlerCreate, VermittlerUpdate, ZusammenfassungIn)
@@ -41,20 +45,76 @@ app = FastAPI(
         "von Wissen (Gespraechsprotokolle, Notizen, Massnahmen, KI-Zusammenfassungen)."
     ),
 )
+logger = logging.getLogger("apobank")
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+
+FEHLER_CODES = {400: "UNGUELTIGE_ANFRAGE", 404: "NICHT_GEFUNDEN", 405: "METHODE_NICHT_ERLAUBT",
+                409: "KONFLIKT", 422: "VALIDIERUNG", 500: "INTERNER_FEHLER"}
+
+
+def _fehler_json(request: Request, status: int, detail: Any, code: str | None = None,
+                 headers: dict[str, str] | None = None, **extra: Any) -> JSONResponse:
+    """Einheitliches Fehlerformat: `detail` (wie FastAPI), `fehler_code`, `request_id` fuers Log."""
+    request_id = getattr(request.state, "request_id", None)
+    return JSONResponse(
+        status_code=status,
+        content={"detail": detail, "fehler_code": code or FEHLER_CODES.get(status, f"HTTP_{status}"),
+                 "request_id": request_id, **extra},
+        headers={**(headers or {}), **({"X-Request-ID": request_id} if request_id else {})},
+    )
+
+
+# Vor CORSMiddleware registriert und damit innerhalb davon: auch 500er tragen CORS-Header,
+# sonst sieht der Browser nur "Failed to fetch" statt der Fehlermeldung.
+@app.middleware("http")
+async def _request_log(request: Request, call_next):
+    request.state.request_id = uuid4().hex[:12]
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception("%s %s -> 500 [%s]", request.method, request.url.path, request.state.request_id)
+        return _fehler_json(request, 500, "Interner Serverfehler. Details stehen im Backend-Log.")
+    if request.url.path.startswith("/api"):
+        dauer_ms = (time.perf_counter() - start) * 1000
+        level = logging.WARNING if response.status_code >= 400 else logging.INFO
+        logger.log(level, "%s %s -> %s (%.0f ms) [%s]", request.method, request.url.path,
+                   response.status_code, dauer_ms, request.state.request_id)
+    response.headers["X-Request-ID"] = request.state.request_id
+    return response
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
 
 Conn = sqlite3.Connection
 
 
+@app.exception_handler(StarletteHTTPException)
+def _http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    return _fehler_json(request, exc.status_code, exc.detail, headers=exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    errors = jsonable_encoder(exc.errors())
+    meldung = "; ".join(
+        f"{'.'.join(str(p) for p in e.get('loc', []) if p != 'body') or 'Anfrage'}: {e.get('msg', '')}" for e in errors
+    )
+    return _fehler_json(request, 422, errors, meldung=f"Eingabe ungueltig – {meldung}")
+
+
 @app.exception_handler(sqlite3.IntegrityError)
-def _integrity_error(_: Request, exc: sqlite3.IntegrityError) -> JSONResponse:
-    return JSONResponse(status_code=409, content={"detail": f"Datenbank-Konflikt: {exc}"})
+def _integrity_error(request: Request, exc: sqlite3.IntegrityError) -> JSONResponse:
+    logger.warning("Datenbank-Konflikt [%s]: %s", getattr(request.state, "request_id", "-"), exc)
+    return _fehler_json(request, 409, f"Datenbank-Konflikt: {exc}")
 
 
 def _require(conn: Conn, vermittler_nr: int) -> dict[str, Any]:
@@ -558,7 +618,7 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, conn: Conn = 
         (conversation_id,),
     ).fetchall()
     history = [{"role": row["rolle"], "content": row["inhalt"]} for row in reversed(history_rows)]
-    reply = copilot.antwort_auf_nachricht(conn, history)
+    reply = openai_copilot.antwort_auf_nachricht(conn, history)
     partner = _partner_summary(db.get_vermittler_full(conn, reply.vermittler_nr)) if reply.vermittler_nr else None
     metadata = {
         "findings": reply.findings,
@@ -566,6 +626,7 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, conn: Conn = 
         "partner": partner,
         "sources": reply.sources,
         "openai_configured": reply.configured,
+        "fehler": reply.fehler,
     }
     cursor = conn.execute(
         "INSERT INTO chat_nachricht (konversation_id, rolle, inhalt, metadaten_json) VALUES (?, 'assistant', ?, ?)",
@@ -581,7 +642,7 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, conn: Conn = 
         "SELECT id, rolle, inhalt, metadaten_json, erstellt_am FROM chat_nachricht WHERE id = ?", (cursor.lastrowid,)
     ).fetchone()
     return {"message": _chat_message(message), "partner": partner, "findings": reply.findings,
-            "openai_configured": reply.configured}
+            "openai_configured": reply.configured, "fehler": reply.fehler}
 
 
 # =========================================================================== Obsidian-Gehirn

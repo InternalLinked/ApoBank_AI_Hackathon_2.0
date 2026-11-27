@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react";
 import type { ExtractedFinding, ManualEntryInput, PartnerSummary } from "@/lib/workspace-contracts";
+import { errorMessage } from "@/lib/workspace-api";
 import { Icon } from "./Icons";
 
 type InspectorPanelProps = {
@@ -19,6 +20,7 @@ export function InspectorPanel({ partner, findings, mobileOpen, onCloseMobile, o
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState("");
+  const [isError, setIsError] = useState(false);
   const pending = findings.filter((finding) => finding.status === "new");
 
   async function savePartner(event: FormEvent<HTMLFormElement>) {
@@ -33,10 +35,12 @@ export function InspectorPanel({ partner, findings, mobileOpen, onCloseMobile, o
         relationshipManager: String(form.get("relationshipManager") ?? ""),
         email: String(form.get("email") ?? ""),
       });
+      setIsError(false);
       setSuccess(`${label} wurde angelegt.`);
       event.currentTarget.reset();
     } catch (error) {
-      setSuccess(error instanceof Error ? error.message : "Der Vermittler konnte nicht angelegt werden.");
+      setIsError(true);
+      setSuccess(errorMessage(error, "Der Vermittler konnte nicht angelegt werden."));
     } finally {
       setSaving(false);
     }
@@ -56,12 +60,14 @@ export function InspectorPanel({ partner, findings, mobileOpen, onCloseMobile, o
         file,
         vermittlerNr: partner?.vermittlerNr,
       });
+      setIsError(false);
       setSuccess(`${label} wurde gespeichert.`);
       event.currentTarget.reset();
       setFileName("");
       setFile(null);
     } catch (error) {
-      setSuccess(error instanceof Error ? error.message : "Die Notiz konnte nicht gespeichert werden.");
+      setIsError(true);
+      setSuccess(errorMessage(error, "Die Notiz konnte nicht gespeichert werden."));
     } finally {
       setSaving(false);
     }
@@ -101,7 +107,7 @@ export function InspectorPanel({ partner, findings, mobileOpen, onCloseMobile, o
         <div className="inspector-scroll manual-scroll">
           <div className="section-title-row"><div><h3>Eintrag erstellen</h3><p>Lege Informationen direkt in der Partnerakte an.</p></div></div>
           <div className="entry-type-switch" role="tablist" aria-label="Eintragstyp"><button className={entryKind === "partner" ? "is-active" : ""} onClick={() => { setEntryKind("partner"); setSuccess(""); }} type="button"><Icon name="person" size={15} />Vermittler</button><button className={entryKind === "note" ? "is-active" : ""} onClick={() => { setEntryKind("note"); setSuccess(""); }} type="button"><Icon name="note" size={15} />Gesprächsnotiz</button></div>
-          {success && <div className="success-banner"><Icon name="check" size={16} />{success}</div>}
+          {success && <div className={`success-banner ${isError ? "is-error" : ""}`} role={isError ? "alert" : "status"}><Icon name={isError ? "close" : "check"} size={16} />{success}</div>}
           {entryKind === "partner" ? (
             <form className="entry-form" onSubmit={savePartner}>
               <label>Vor- und Nachname<input name="name" placeholder="z. B. Alex Beispiel" required /></label>

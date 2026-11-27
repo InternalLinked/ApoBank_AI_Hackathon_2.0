@@ -45,6 +45,19 @@ def test_chat_loeschen(client):
     assert client.delete(f"/api/chat/conversations/{chat_id}").status_code == 404
 
 
+def test_fehlerformat_mit_code_und_request_id(client):
+    r = client.get("/api/vermittler/999999")
+    body = r.json()
+    assert r.status_code == 404
+    assert body["fehler_code"] == "NICHT_GEFUNDEN" and body["detail"]
+    assert body["request_id"] and r.headers["X-Request-ID"] == body["request_id"]
+
+    r = client.post("/api/chat/conversations", json={"titel": ""})
+    body = r.json()
+    assert r.status_code == 422 and body["fehler_code"] == "VALIDIERUNG"
+    assert isinstance(body["detail"], list) and "titel" in body["meldung"]
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     xlsx = tmp_path / "liste.xlsx"

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createWorkspaceApi } from "@/lib/workspace-api";
+import { createWorkspaceApi, errorMessage } from "@/lib/workspace-api";
 import type { ChatMessage, ExtractedFinding, ManualEntryInput, WorkspaceApi, WorkspaceSnapshot } from "@/lib/workspace-contracts";
 import { ChatSidebar } from "./ChatSidebar";
 import { ConversationPane } from "./ConversationPane";
@@ -23,7 +23,15 @@ export function Workspace() {
   const [findings, setFindings] = useState<ExtractedFinding[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [mobileDrawer, setMobileDrawer] = useState<"chats" | "details" | null>(null);
-  const [toast, setToast] = useState("");
+  const [toast, setToastState] = useState<{ text: string; tone: "success" | "error" } | null>(null);
+
+  function setToast(text: string) {
+    setToastState(text ? { text, tone: "success" } : null);
+  }
+
+  function showError(error: unknown, fallback: string) {
+    setToastState({ text: errorMessage(error, fallback), tone: "error" });
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -42,7 +50,7 @@ export function Workspace() {
         setFindings(initial.findings);
         setActiveConversationId(initial.conversations[0].id);
       } catch (error) {
-        if (mounted) setToast(error instanceof Error ? error.message : "Die Verbindung zum Backend konnte nicht aufgebaut werden.");
+        if (mounted) showError(error, "Die Verbindung zum Backend konnte nicht aufgebaut werden.");
       }
     }
     void load();
@@ -82,8 +90,9 @@ export function Workspace() {
       addMessage(conversationId, reply.message);
       setSnapshot((current) => ({ ...current, partner: reply.partner ?? current.partner, aiConfigured: reply.aiConfigured }));
       if (reply.findings.length > 0) setFindings(reply.findings);
+      if (reply.error) showError(null, reply.error);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Die Anfrage konnte nicht beantwortet werden.");
+      showError(error, "Die Anfrage konnte nicht beantwortet werden.");
     } finally {
       setIsSending(false);
     }
@@ -102,7 +111,7 @@ export function Workspace() {
       setActiveConversationId(conversation.id);
       setMobileDrawer(null);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Neuer Chat konnte nicht angelegt werden.");
+      showError(error, "Neuer Chat konnte nicht angelegt werden.");
     }
   }
 
@@ -110,7 +119,7 @@ export function Workspace() {
     try {
       await api.deleteConversation(conversationId);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Der Chat konnte nicht gelöscht werden.");
+      showError(error, "Der Chat konnte nicht gelöscht werden.");
       return;
     }
     const remaining = snapshot.conversations.filter((conversation) => conversation.id !== conversationId);
@@ -137,11 +146,16 @@ export function Workspace() {
 
   async function confirmFindings(findingIds: string[]) {
     if (!snapshot.partner) {
-      setToast("Bitte zuerst eine Partnerakte im Chat öffnen.");
+      showError(null, "Bitte zuerst eine Partnerakte im Chat öffnen.");
       return;
     }
     const selected = findings.filter((finding) => findingIds.includes(finding.id));
-    await api.confirmFindings(activeConversationId, snapshot.partner, selected);
+    try {
+      await api.confirmFindings(activeConversationId, snapshot.partner, selected);
+    } catch (error) {
+      showError(error, "Die Angaben konnten nicht gespeichert werden.");
+      return;
+    }
     setFindings((current) => current.map((finding) => findingIds.includes(finding.id) ? { ...finding, status: "confirmed" } : finding));
     setToast("Die bestätigten Angaben wurden als Notiz in der Partnerakte gespeichert.");
   }
@@ -160,7 +174,13 @@ export function Workspace() {
       <ChatSidebar conversations={snapshot.conversations} activeConversationId={activeConversationId} mobileOpen={mobileDrawer === "chats"} onCloseMobile={() => setMobileDrawer(null)} onSelect={selectConversation} onNewConversation={createConversation} onDelete={deleteConversation} />
       <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} onOpenDetails={() => setMobileDrawer("details")} />
       <InspectorPanel partner={snapshot.partner} findings={findings} mobileOpen={mobileDrawer === "details"} onCloseMobile={() => setMobileDrawer(null)} onSaveEntry={saveEntry} onConfirmFindings={confirmFindings} />
-      {toast && <div className="toast" role="status"><Icon name="check" size={16} />{toast}<button onClick={() => setToast("")} aria-label="Hinweis schließen"><Icon name="close" size={15} /></button></div>}
+      {toast && (
+        <div className={`toast ${toast.tone === "error" ? "is-error" : ""}`} role={toast.tone === "error" ? "alert" : "status"}>
+          <Icon name={toast.tone === "error" ? "close" : "check"} size={16} />
+          <span className="toast-text">{toast.text}</span>
+          <button onClick={() => setToast("")} aria-label="Hinweis schließen"><Icon name="close" size={15} /></button>
+        </div>
+      )}
     </div>
   );
 }

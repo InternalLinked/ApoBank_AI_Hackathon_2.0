@@ -84,6 +84,8 @@ export type ChatReply = {
   partner: PartnerSummary | null;
   findings: ExtractedFinding[];
   aiConfigured: boolean;
+  /** Gesetzt, wenn der Copilot einen Fehler gemeldet hat (z. B. „… (OPENAI_AUTH · HTTP 401)“). */
+  error?: string;
 };
 
 export interface WorkspaceApi {
