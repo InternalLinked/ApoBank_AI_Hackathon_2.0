@@ -29,6 +29,7 @@ export function Workspace() {
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   // Rechte Leiste ohne geöffnete Akte: standardmäßig eingefahren (mehr Platz für den Chat), per Button einblendbar
   const [inspectorPinned, setInspectorPinned] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const partnerRequest = useRef(0);
 
   async function loadPartnerDetail(partner: PartnerSummary | null) {
@@ -271,10 +272,10 @@ export function Workspace() {
   const inspectorCollapsed = !snapshot.partner && !inspectorPinned;
 
   return (
-    <div className={`workspace-shell ${inspectorCollapsed ? "inspector-collapsed" : ""}`}>
+    <div className={`workspace-shell ${inspectorCollapsed ? "inspector-collapsed" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       {mobileDrawer && <button className="mobile-backdrop" aria-label="Seitenleiste schließen" onClick={() => setMobileDrawer(null)} />}
       <ChatSidebar accountName={snapshot.accountName} conversations={snapshot.conversations} activeConversationId={activeConversationId} mobileOpen={mobileDrawer === "chats"} onCloseMobile={() => setMobileDrawer(null)} onSelect={selectConversation} onNewConversation={createConversation} onDelete={deleteConversation} />
-      <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} onOpenDetails={() => setMobileDrawer("details")} inspectorCollapsed={inspectorCollapsed} onExpandInspector={() => setInspectorPinned(true)} onSelectCandidate={selectCandidate} onOpenPartner={openPartnerFromLink} onTranscribe={transcribeAudio} onError={setToast} onConfirmProposal={confirmProposal} onRejectProposal={rejectProposal} />
+      <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)} onOpenDetails={() => setMobileDrawer("details")} inspectorCollapsed={inspectorCollapsed} onExpandInspector={() => setInspectorPinned(true)} onSelectCandidate={selectCandidate} onOpenPartner={openPartnerFromLink} onTranscribe={transcribeAudio} onError={setToast} onConfirmProposal={confirmProposal} onRejectProposal={rejectProposal} />
       <InspectorPanel partner={snapshot.partner} partnerDetail={partnerDetail} findings={findings} mobileOpen={mobileDrawer === "details"} onCloseMobile={() => { setInspectorPinned(false); setMobileDrawer(null); }} onSaveEntry={saveEntry} onConfirmFindings={confirmFindings} api={api} profileRefreshKey={profileRefreshKey} onError={setToast} onClosePartner={closePartner} />
       {toast && <div className="toast" role="status"><Icon name="check" size={16} />{toast}<button onClick={() => setToast("")} aria-label="Hinweis schließen"><Icon name="close" size={15} /></button></div>}
     </div>
