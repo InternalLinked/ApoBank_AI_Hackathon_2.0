@@ -37,7 +37,7 @@ export type PartnerCandidate = {
 };
 
 export type FindingStatus = "new" | "confirmed";
-export type FindingGroup = "partner" | "business" | "next-step";
+export type FindingGroup = "partner" | "business" | "next-step" | "persoenlich";
 
 export type ExtractedFinding = {
   id: string;
@@ -64,11 +64,46 @@ export type PartnerDetail = PartnerSummary & {
   branch: string;
   marketArea: string;
   interests: string[];
+  /** obsidian://-Link auf die Hub-Notiz des Vermittlers. */
+  obsidianUri: string;
   businessFigures: Array<{
     year: number;
     volume: number;
     loanCount: number;
   }>;
+};
+
+export type ProfileCategory = "familie" | "haustiere" | "hobbys" | "reisen" | "vorlieben" | "termine" | "sonstiges";
+
+/** Eine persönliche Info aus dem Obsidian-Profil (z. B. „Hat einen Hund namens Tim“). */
+export type ProfileFact = {
+  id: string;
+  category: string;
+  categoryLabel: string;
+  text: string;
+  date: string | null;
+};
+
+export type PersonalProfile = {
+  facts: ProfileFact[];
+  categories: Record<string, string>;
+  /** obsidian://-Link auf die Profil-Notiz. */
+  obsidianUri: string;
+};
+
+export type ObsidianGraphNode = {
+  id: string;
+  label: string;
+  /** vermittler | profil | fakt | eintrag | betreuer | filiale | vermittler-link | notiz */
+  type: string;
+  uri: string | null;
+  detail: string | null;
+};
+
+export type ObsidianGraph = {
+  center: string;
+  nodes: ObsidianGraphNode[];
+  edges: Array<{ from: string; to: string }>;
 };
 
 export type WorkspaceSnapshot = {
@@ -123,4 +158,8 @@ export interface WorkspaceApi {
   getPartnerDetail(vermittlerNr: number): Promise<PartnerDetail>;
   createEntry(input: ManualEntryInput): Promise<SavedEntry>;
   confirmFindings(conversationId: string, partner: PartnerSummary, findings: ExtractedFinding[]): Promise<void>;
+  getProfile(vermittlerNr: number): Promise<PersonalProfile>;
+  addProfileFact(vermittlerNr: number, text: string, category?: ProfileCategory): Promise<ProfileFact>;
+  deleteProfileFact(vermittlerNr: number, factId: string): Promise<void>;
+  getObsidianGraph(vermittlerNr: number): Promise<ObsidianGraph>;
 }

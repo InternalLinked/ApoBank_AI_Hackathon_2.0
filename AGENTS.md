@@ -49,7 +49,7 @@ ApoBank_AI_Hackathon_2.0/
 ├── data/
 │   ├── Musterliste_apoBank.xlsx   Quelldaten (synthetische Testdaten, 1.001 Vermittler; im Repo enthalten)
 │   └── apobank.db                 generiert (gitignored)
-├── vault/                Obsidian-Vault, generiert (gitignored)
+├── Obsidian/hackathon/   Obsidian-Vault (nur .obsidian-Konfig im Repo; Vermittler/ ist gitignored)
 ├── requirements.txt
 ├── README.md             Kurzanleitung für Menschen
 └── AGENTS.md             dieses Dokument
@@ -77,8 +77,8 @@ Umgebungsvariablen (`backend/config.py`):
 |---|---|
 | `APOBANK_DB_PATH` | `data/apobank.db` |
 | `APOBANK_EXCEL_PATH` | `data/Musterliste_apoBank.xlsx` |
-| `APOBANK_VAULT_PATH` | `vault/` |
-| `APOBANK_VAULT_NAME` | `vault` (Name in `obsidian://`-Links = Ordnername des Vaults in Obsidian) |
+| `APOBANK_VAULT_PATH` | `Obsidian/hackathon/` |
+| `APOBANK_VAULT_NAME` | `hackathon` (Name in `obsidian://`-Links = Ordnername des Vaults in Obsidian) |
 
 API-Doku zur Laufzeit: `http://127.0.0.1:8000/docs`, Maschinen-lesbar: `/openapi.json`
 (kann 1:1 als Tool-Definition für einen Agenten dienen).
@@ -196,6 +196,16 @@ Filter: `marktgebiet`, `filial_nr`, `mitarbeiter_id`, `status`.
 | POST | `/api/vermittler/{nr}/obsidian/sync` | Hub aus DB neu aufbauen |
 | POST | `/api/obsidian/sync` | Alle Hubs neu aufbauen |
 | GET | `/api/obsidian/suche?q=` | Volltextsuche über alle Notizen (Einträge vor Hubs) |
+| GET | `/api/vermittler/{nr}/profil` | Persönliches Profil: `fakten[]` (`id`, `kategorie`, `text`, `datum`) + `obsidian://`-Link |
+| POST | `/api/vermittler/{nr}/profil/fakten` | `{text, kategorie?, datum?}` – persönliche Info ablegen (ohne Kategorie: Stichwort-Erkennung) |
+| DELETE | `/api/vermittler/{nr}/profil/fakten/{id}` | Info entfernen |
+| GET | `/api/vermittler/{nr}/obsidian/netz` | Lokaler Graph: `knoten[]` (`id`, `label`, `typ`, `uri`), `kanten[]` – Hub, Profil, Infos, Einträge, Betreuer/Filiale, Wiki- und Backlinks |
+
+Profil-Kategorien: `familie | haustiere | hobbys | reisen | vorlieben | termine | sonstiges`.
+Das Profil steckt auch in `kontext_text` und im Copilot-Werkzeug `hole_partnerakte` (`persoenliches_profil`).
+Der OpenAI-Chat (`backend/openai_copilot.py`) speichert über sein Werkzeug `im_obsidian_speichern` **sofort und
+ohne Rückfrage** ins Obsidian-Netz: `gruppe = "persoenlich"` → Profil, sonst → Notiz-Eintrag (`next-step` → Maßnahme).
+Er schreibt nur in Obsidian (+ Protokollzeile in `obsidian_eintrag`), **nie** in Stammdaten oder Geschäftszahlen.
 
 Body für `POST …/eintraege`:
 ```json
@@ -229,8 +239,9 @@ Fehlercodes: 404 Vermittler unbekannt, 409 Konflikt (doppelte Nr./KNR), 422 Vali
 **„Ich hatte gerade ein Gespräch mit X …“ (Protokoll per Chat)**
 1. Vermittler identifizieren (bei mehreren Treffern beim Nutzer nachfragen)
 2. Aus dem Freitext `titel`, `teilnehmer`, `massnahmen` extrahieren
-3. **Vor dem Schreiben Bestätigung des Nutzers einholen** (Vorgabe der Aufgabe: „nach Bestätigung hochgeladen“)
-4. `POST /api/vermittler/{nr}/obsidian/eintraege`
+3. Direkt speichern, **ohne Rückfrage** (Entscheidung des Teams): `POST /api/vermittler/{nr}/obsidian/eintraege`,
+   Persönliches über `POST /api/vermittler/{nr}/profil/fakten`. Nur bei unklarem Vermittler vorher nachfragen.
+4. Dem Nutzer kurz sagen, was gespeichert wurde (Korrektur im Profil bzw. in Obsidian möglich).
 
 **„Bereite meinen Termin mit X vor“**
 `GET …/kontext` + `GET /api/analytics/wachstum?gruppe=vermittler&…` für Einordnung; offene Maßnahmen
@@ -252,6 +263,7 @@ vault/
 └── Vermittler/
     └── VM-<vermittler_nr>/
         ├── VM-<vermittler_nr>.md        Hub-Notiz
+        ├── VM-<vermittler_nr> Profil.md Persönliches Profil (Familie, Haustiere, Urlaub, Hobbys …)
         └── Eintraege/
             └── <YYYY-MM-DD>_<HHMMSS>_<typ>_<slug>.md
 ```
@@ -268,6 +280,10 @@ vault/
   ```
   Alles **außerhalb** der Blöcke (v. a. „## Freie Notizen“) wird nie überschrieben.
   Das **Frontmatter** des Hubs wird dagegen bei jedem Sync komplett neu geschrieben.
+- **Profil-Notiz** (`VM-<nr> Profil.md`): wird bei jedem Sync angelegt, falls sie fehlt, aber **nie
+  überschrieben** – sie gehört dem Menschen. Je Kategorie eine `## <Label>`-Überschrift, darunter eine Info pro
+  Zeile: `- Text · YYYY-MM-DD` (Datum optional). Das Backend hängt nur Zeilen an bzw. löscht einzelne Zeilen
+  (`id` = Hash aus Kategorie + Text). Der Hub bettet das Profil im verwalteten Block `profil` per `![[…]]` ein.
 - **Eintrags-Notizen**: Frontmatter (`typ`, `titel`, `datum`, `vermittler_nr`, `vermittler: "[[VM-nr]]"`,
   `teilnehmer`, `autor`, `quelle`, `offene_massnahmen`, `tags`, `erstellt_am`), dann `## Inhalt`
   und ggf. `## Maßnahmen` als Tasks: `- [ ] Text 👤 Person 📅 YYYY-MM-DD` (Obsidian-Tasks-Format).
@@ -325,7 +341,7 @@ Es ändert keine bestehenden Dateien. Details und die Frontend-Anbindung stehen 
   (Team-API + `/api/copilot/*`)
 - Synthetische Demo-Daten: `.venv\Scripts\python -m backend.copilot.demo_daten --neu`
 - Modell austauschbar über `LLM_PROVIDER` (`fake` offline | `bedrock`), `LLM_MODEL_ID`, `AWS_REGION` (Sandbox: us-west-2/us-east-1).
-- Regeln:
+- Regeln (gelten für den Bedrock-Copilot in `backend/copilot/`; der OpenAI-Chat schreibt Notizen/Profil direkt, s. Abschnitt 5):
   - Das Modell rechnet nicht, alle Zahlen kommen aus SQL.
   - Bei Mehrdeutigkeit fragt der Agent nach.
   - Geschrieben wird nur über Entwürfe und den Endpunkt `…/entwuerfe/{id}/bestaetigen`, den ausschließlich die Oberfläche

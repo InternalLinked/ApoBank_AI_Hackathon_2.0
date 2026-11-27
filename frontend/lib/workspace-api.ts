@@ -4,9 +4,13 @@ import type {
   Conversation,
   ExtractedFinding,
   ManualEntryInput,
+  ObsidianGraph,
   PartnerCandidate,
   PartnerDetail,
   PartnerSummary,
+  PersonalProfile,
+  ProfileCategory,
+  ProfileFact,
   SavedEntry,
   WorkspaceApi,
   WorkspaceSnapshot,
@@ -180,7 +184,7 @@ function toPartner(value: unknown): PartnerSummary | null {
 function toFinding(value: unknown, index: number): ExtractedFinding | null {
   const item = record(value);
   const group = item.group;
-  if (group !== "partner" && group !== "business" && group !== "next-step") return null;
+  if (group !== "partner" && group !== "business" && group !== "next-step" && group !== "persoenlich") return null;
   return {
     id: String(item.id ?? `finding-${index}`),
     group,
@@ -276,12 +280,37 @@ function toPartnerDetail(value: unknown): PartnerDetail | null {
     branch: String(betreuung.filiale ?? ""),
     marketArea: String(betreuung.marktgebiet ?? ""),
     interests: Array.isArray(item.interessen) ? item.interessen.map(String) : [],
+    obsidianUri: String(record(item.obsidian).uri ?? ""),
     businessFigures: figures.map((figure) => ({
       year: Number(figure.jahr ?? 0),
       volume: Number(figure.volumen_eur ?? 0),
       loanCount: Number(figure.anzahl_darlehen ?? 0),
     })).filter((figure) => figure.year > 0),
   };
+}
+
+function toProfileFact(value: unknown): ProfileFact {
+  const item = record(value);
+  return {
+    id: String(item.id ?? ""),
+    category: String(item.kategorie ?? "sonstiges"),
+    categoryLabel: String(item.kategorie_label ?? item.kategorie ?? "Sonstiges"),
+    text: String(item.text ?? ""),
+    date: typeof item.datum === "string" ? item.datum : null,
+  };
+}
+
+/** Ordnet das vom Copilot gelieferte Label („Haustiere“, „Reisen & Urlaub“ …) einer Profil-Kategorie zu. */
+function categoryFromLabel(label: string): ProfileCategory | undefined {
+  const value = label.toLocaleLowerCase("de-DE");
+  if (value.includes("famil")) return "familie";
+  if (value.includes("haustier") || value.includes("tier")) return "haustiere";
+  if (value.includes("hobby") || value.includes("freizeit")) return "hobbys";
+  if (value.includes("reise") || value.includes("urlaub")) return "reisen";
+  if (value.includes("vorliebe") || value.includes("gespräch") || value.includes("gespraech")) return "vorlieben";
+  if (value.includes("datum") || value.includes("daten") || value.includes("termin") || value.includes("geburtstag")) return "termine";
+  if (value.includes("sonstig")) return "sonstiges";
+  return undefined; // Backend erkennt die Kategorie dann per Stichwort
 }
 
 function splitName(fullName: string): { vorname: string; name: string } {
@@ -434,7 +463,16 @@ export function createWorkspaceApi(): WorkspaceApi {
       return { id: `note-${Date.now()}`, label: `Gesprächsnotiz für ${partner.name}`, partner };
     },
 
-    async confirmFindings(_conversationId: string, partner: PartnerSummary, findings: ExtractedFinding[]): Promise<void> {
+    async confirmFindings(_conversationId: string, partner: PartnerSummary, allFindings: ExtractedFinding[]): Promise<void> {
+      // Persönliches landet im Obsidian-Profil, alles andere wie bisher als Notiz-Eintrag.
+      for (const finding of allFindings.filter((item) => item.group === "persoenlich")) {
+        await request(`/vermittler/${partner.vermittlerNr}/profil/fakten`, {
+          method: "POST",
+          body: JSON.stringify({ text: finding.value, kategorie: categoryFromLabel(finding.label) }),
+        });
+      }
+      const findings = allFindings.filter((item) => item.group !== "persoenlich");
+      if (findings.length === 0) return;
       await request(`/vermittler/${partner.vermittlerNr}/obsidian/eintraege`, {
         method: "POST",
         body: JSON.stringify({
@@ -446,6 +484,48 @@ export function createWorkspaceApi(): WorkspaceApi {
           tags: ["chat-bestaetigt"],
         }),
       });
+    },
+
+    async getProfile(vermittlerNr: number): Promise<PersonalProfile> {
+      const data = record(await request<unknown>(`/vermittler/${vermittlerNr}/profil`));
+      const categories = record(data.kategorien);
+      return {
+        facts: Array.isArray(data.fakten) ? data.fakten.map(toProfileFact) : [],
+        categories: Object.fromEntries(Object.entries(categories).map(([key, label]) => [key, String(label)])),
+        obsidianUri: String(data.uri ?? ""),
+      };
+    },
+
+    async addProfileFact(vermittlerNr: number, text: string, category?: ProfileCategory): Promise<ProfileFact> {
+      return toProfileFact(await request<unknown>(`/vermittler/${vermittlerNr}/profil/fakten`, {
+        method: "POST",
+        body: JSON.stringify({ text, kategorie: category }),
+      }));
+    },
+
+    async getObsidianGraph(vermittlerNr: number): Promise<ObsidianGraph> {
+      const data = record(await request<unknown>(`/vermittler/${vermittlerNr}/obsidian/netz`));
+      return {
+        center: String(data.zentrum ?? ""),
+        nodes: (Array.isArray(data.knoten) ? data.knoten : []).map((value) => {
+          const item = record(value);
+          return {
+            id: String(item.id ?? ""),
+            label: String(item.label ?? ""),
+            type: String(item.typ ?? "notiz"),
+            uri: typeof item.uri === "string" ? item.uri : null,
+            detail: typeof item.detail === "string" ? item.detail : null,
+          };
+        }),
+        edges: (Array.isArray(data.kanten) ? data.kanten : []).map((value) => {
+          const item = record(value);
+          return { from: String(item.von ?? ""), to: String(item.nach ?? "") };
+        }),
+      };
+    },
+
+    async deleteProfileFact(vermittlerNr: number, factId: string): Promise<void> {
+      await request<void>(`/vermittler/${vermittlerNr}/profil/fakten/${encodeURIComponent(factId)}`, { method: "DELETE" });
     },
   };
 }

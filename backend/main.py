@@ -26,8 +26,8 @@ from fastapi.staticfiles import StaticFiles
 
 from . import db, obsidian, openai_copilot
 from .config import settings
-from .schemas import (ChatKonversationCreate, ChatNachrichtIn, EintragIn, GeschaeftszahlIn, SqlQueryIn,
-                      VermittlerCreate, VermittlerUpdate, ZusammenfassungIn)
+from .schemas import (ChatKonversationCreate, ChatNachrichtIn, EintragIn, GeschaeftszahlIn, ProfilFaktIn,
+                      SqlQueryIn, VermittlerCreate, VermittlerUpdate, ZusammenfassungIn)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -779,6 +779,46 @@ def put_zusammenfassung(vermittler_nr: int, body: ZusammenfassungIn,
         obsidian.sync_hub(v)
     obsidian.set_summary(vermittler_nr, body.text, body.quelle)
     return {**obsidian.reference(vermittler_nr), "zusammenfassung": obsidian.read_brain(vermittler_nr)["zusammenfassung"]}
+
+
+@app.get("/api/vermittler/{vermittler_nr}/obsidian/netz", tags=["Obsidian"],
+         summary="Lokaler Obsidian-Graph um einen Vermittler (Knoten + Kanten)")
+def get_obsidian_netz(vermittler_nr: int, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    """Hub, Profil mit persoenlichen Infos, Eintraege, Betreuer/Filiale und per Wikilink verbundene Notizen.
+    Knoten mit `uri` lassen sich per `obsidian://` in Obsidian oeffnen."""
+    v = _require(conn, vermittler_nr)
+    if not obsidian.abs_path(obsidian.hub_rel(vermittler_nr)).exists():
+        obsidian.sync_hub(v)
+    return obsidian.netz(v)
+
+
+@app.get("/api/vermittler/{vermittler_nr}/profil", tags=["Obsidian"],
+         summary="Persoenliches Profil (Familie, Haustiere, Urlaub, Hobbys ...) fuer die Gespraechsvorbereitung")
+def get_profil(vermittler_nr: int, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    """Liest die Obsidian-Notiz `VM-<nr> Profil.md`, legt sie bei Bedarf an. Auch in Obsidian ergaenzte Zeilen erscheinen."""
+    v = _require(conn, vermittler_nr)
+    if not obsidian.abs_path(obsidian.profil_rel(vermittler_nr)).exists():
+        obsidian.sync_hub(v)
+    return {"vermittler_nr": vermittler_nr, "anzeigename": v["anzeigename"], **obsidian.read_profil(vermittler_nr)}
+
+
+@app.post("/api/vermittler/{vermittler_nr}/profil/fakten", tags=["Obsidian"], status_code=201,
+          summary="Persoenliche Info zum Vermittler im Obsidian-Profil ablegen")
+def add_profil_fakt(vermittler_nr: int, body: ProfilFaktIn, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    """Ohne `kategorie` wird sie per Stichwort erkannt (z. B. "Hund" -> haustiere, "Urlaub" -> reisen)."""
+    v = _require(conn, vermittler_nr)
+    if not obsidian.abs_path(obsidian.hub_rel(vermittler_nr)).exists():
+        obsidian.sync_hub(v)
+    return obsidian.add_profil_fakt(v, body.text, body.kategorie, body.datum)
+
+
+@app.delete("/api/vermittler/{vermittler_nr}/profil/fakten/{fakt_id}", tags=["Obsidian"], status_code=204,
+            summary="Persoenliche Info aus dem Profil entfernen")
+def delete_profil_fakt(vermittler_nr: int, fakt_id: str, conn: Conn = Depends(db.get_conn)) -> Response:
+    _require(conn, vermittler_nr)
+    if not re.fullmatch(r"[0-9a-f]{12}", fakt_id) or not obsidian.delete_profil_fakt(vermittler_nr, fakt_id):
+        raise HTTPException(404, "Info nicht gefunden (evtl. schon in Obsidian geaendert)")
+    return Response(status_code=204)
 
 
 @app.post("/api/vermittler/{vermittler_nr}/obsidian/sync", tags=["Obsidian"],

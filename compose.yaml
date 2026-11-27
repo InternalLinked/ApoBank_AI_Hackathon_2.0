@@ -9,6 +9,7 @@ services:
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      APOBANK_VAULT_NAME: hackathon
     volumes:
       - ./data:/app/data
-      - ./vault:/app/vault
+      - ./Obsidian/hackathon:/app/vault

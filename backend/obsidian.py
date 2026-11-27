@@ -265,14 +265,190 @@ def sync_hub(v: dict[str, Any]) -> dict[str, str]:
             "## Stammdaten",
             _block("stammdaten", _stammdaten_md(v)),
             "",
+            "## Persönliches Profil",
+            _block("profil", _profil_link_md(nr)),
+            "",
             "## Einträge",
             _block("eintraege", _eintraege_md(nr)),
             "",
             "## Freie Notizen",
             "",
         ])
+    if "<!-- BEGIN:profil -->" not in text:
+        # Bestehende Hubs (vor Einfuehrung des Profils angelegt): Abschnitt vor "Einträge" einfuegen.
+        anker = "## Einträge\n<!-- BEGIN:eintraege -->"
+        abschnitt = f"## Persönliches Profil\n{_block('profil', _profil_link_md(nr))}\n\n"
+        text = text.replace(anker, abschnitt + anker, 1) if anker in text else text
+    text = _replace_block(text, "profil", _profil_link_md(nr))
     path.write_text(text, encoding="utf-8")
+    ensure_profil(v)
     return reference(nr)
+
+
+# --------------------------------------------------------------------------- Persoenliches Profil
+#
+# Eine Notiz pro Vermittler: Vermittler/VM-<nr>/VM-<nr> Profil.md
+# Persoenliche Infos (Familie, Haustiere, Urlaub, Hobbys ...) als Aufzaehlung unter
+# Kategorie-Ueberschriften. Die Notiz gehoert dem Menschen: Das Backend haengt nur
+# Zeilen an oder entfernt einzelne Zeilen, Bearbeitungen in Obsidian bleiben erhalten.
+
+PROFIL_KATEGORIEN: dict[str, str] = {
+    "familie": "Familie",
+    "haustiere": "Haustiere",
+    "hobbys": "Hobbys & Freizeit",
+    "reisen": "Reisen & Urlaub",
+    "vorlieben": "Vorlieben & Gesprächsstil",
+    "termine": "Wichtige Daten",
+    "sonstiges": "Sonstiges",
+}
+
+_KATEGORIE_STICHWORTE: dict[str, tuple[str, ...]] = {
+    "haustiere": ("hund", "katze", "kater", "pferd", "haustier", "welpe", "papagei", "hamster", "kaninchen"),
+    "reisen": ("urlaub", "reise", "verreist", "ferien", "flug", "kreuzfahrt", "mallorca", "italien", "strand"),
+    "familie": ("tochter", "sohn", "kinder", "kind ", "ehefrau", "ehemann", "frau ", "mann ", "verheiratet",
+                "hochzeit", "enkel", "eltern", "mutter", "vater", "bruder", "schwester", "baby", "familie"),
+    "hobbys": ("hobby", "golf", "tennis", "segeln", "laufen", "marathon", "fussball", "fußball", "ski",
+               "radfahren", "fahrrad", "angeln", "jagd", "musik", "spielt", "verein", "fan von", "kocht"),
+    "termine": ("geburtstag", "jubilaeum", "jubiläum", "jahrestag", "praxisjubil"),
+    "vorlieben": ("mag ", "mag keine", "bevorzugt", "lieber", "trinkt", "kaffee", "tee", "duzen", "siezen",
+                  "vegetar", "vegan", "anrufen", "per mail", "morgens", "abends", "humor"),
+}
+
+_PROFIL_ZEILE_RE = re.compile(r"^- (?P<text>.+?)(?: · (?P<datum>\d{4}-\d{2}-\d{2}))?\s*$")
+
+
+def profil_rel(vermittler_nr: int) -> str:
+    return f"{folder_rel(vermittler_nr)}/{note_name(vermittler_nr)} Profil.md"
+
+
+def _profil_link_md(vermittler_nr: int) -> str:
+    name = f"{note_name(vermittler_nr)} Profil"
+    return f"Persönliche Infos für die Gesprächsvorbereitung: [[{name}|Profil öffnen]]\n\n![[{name}]]"
+
+
+def kategorie_erkennen(text: str) -> str:
+    """Einfache Stichwort-Zuordnung, falls der Nutzer keine Kategorie waehlt."""
+    t = f" {text.lower()} "
+    for kategorie, woerter in _KATEGORIE_STICHWORTE.items():
+        if any(w in t for w in woerter):
+            return kategorie
+    return "sonstiges"
+
+
+def _kategorie_slug(ueberschrift: str) -> str:
+    for slug, label in PROFIL_KATEGORIEN.items():
+        if ueberschrift.strip().lower() == label.lower():
+            return slug
+    return slugify(ueberschrift, 40)
+
+
+def _fakt_id(kategorie: str, text: str) -> str:
+    import hashlib
+    return hashlib.sha1(f"{kategorie}|{text}".encode("utf-8")).hexdigest()[:12]
+
+
+def ensure_profil(v: dict[str, Any]) -> str:
+    """Legt die Profil-Notiz an, falls sie fehlt. Bestehende Notizen werden nie ueberschrieben."""
+    nr = v["vermittler_nr"]
+    rel = profil_rel(nr)
+    path = abs_path(rel)
+    if path.exists():
+        return rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fm = render_frontmatter({
+        "typ": "vermittler-profil",
+        "vermittler_nr": nr,
+        "vermittler": f"[[{note_name(nr)}]]",
+        "tags": ["vermittler-profil"],
+        "erstellt_am": datetime.now().isoformat(timespec="seconds"),
+    })
+    parts = [fm, f"# Persönliches Profil – {v['anzeigename']}", "",
+             "> [!tip] Für die Gesprächsvorbereitung",
+             "> Persönliches, das im Gespräch hilft (Familie, Haustiere, Urlaub, Hobbys …). "
+             "Eine Info pro Zeile als `- Text · JJJJ-MM-TT`. Darf frei in Obsidian bearbeitet werden.", ""]
+    for label in PROFIL_KATEGORIEN.values():
+        parts += [f"## {label}", ""]
+    path.write_text("\n".join(parts), encoding="utf-8")
+    return rel
+
+
+def read_profil(vermittler_nr: int) -> dict[str, Any]:
+    """Liest die Profil-Notiz: Fakten je Kategorie (auch von Hand in Obsidian ergaenzte)."""
+    rel = profil_rel(vermittler_nr)
+    path = abs_path(rel)
+    fakten: list[dict[str, Any]] = []
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    _, body = parse_frontmatter(text)
+    kategorie: str | None = None
+    for zeile in body.splitlines():
+        if zeile.startswith("## "):
+            kategorie = _kategorie_slug(zeile[3:])
+            continue
+        m = _PROFIL_ZEILE_RE.match(zeile.rstrip())
+        if kategorie is None or not m:
+            continue
+        inhalt = m.group("text").strip()
+        if not inhalt:
+            continue
+        fakten.append({
+            "id": _fakt_id(kategorie, inhalt),
+            "kategorie": kategorie,
+            "kategorie_label": PROFIL_KATEGORIEN.get(kategorie, kategorie),
+            "text": inhalt,
+            "datum": m.group("datum"),
+        })
+    return {"pfad": rel, "uri": obsidian_uri(rel), "vorhanden": path.exists(), "fakten": fakten,
+            "kategorien": PROFIL_KATEGORIEN}
+
+
+def add_profil_fakt(v: dict[str, Any], text: str, kategorie: str | None = None,
+                    datum: date | None = None) -> dict[str, Any]:
+    """Haengt eine persoenliche Info unter der passenden Kategorie-Ueberschrift an."""
+    nr = v["vermittler_nr"]
+    ensure_profil(v)
+    path = abs_path(profil_rel(nr))
+    text = " ".join(text.split())  # eine Zeile, keine Markdown-Struktur einschleusen
+    kategorie = kategorie or kategorie_erkennen(text)
+    label = PROFIL_KATEGORIEN.get(kategorie, PROFIL_KATEGORIEN["sonstiges"])
+    kategorie = _kategorie_slug(label)
+    zeile = f"- {text} · {(datum or date.today()).isoformat()}"
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    try:
+        start = next(i for i, z in enumerate(lines) if z.startswith("## ") and _kategorie_slug(z[3:]) == kategorie)
+    except StopIteration:
+        lines += ["", f"## {label}", ""]
+        start = len(lines) - 2
+    ende = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    letzte = max((i for i in range(start + 1, ende) if lines[i].startswith("- ")), default=start)
+    lines.insert(letzte + 1, zeile)
+    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return next(f for f in reversed(read_profil(nr)["fakten"]) if f["text"] == text and f["kategorie"] == kategorie)
+
+
+def delete_profil_fakt(vermittler_nr: int, fakt_id: str) -> bool:
+    path = abs_path(profil_rel(vermittler_nr))
+    if not path.exists():
+        return False
+    lines = path.read_text(encoding="utf-8").splitlines()
+    kategorie: str | None = None
+    for i, zeile in enumerate(lines):
+        if zeile.startswith("## "):
+            kategorie = _kategorie_slug(zeile[3:])
+            continue
+        m = _PROFIL_ZEILE_RE.match(zeile.rstrip())
+        if kategorie and m and _fakt_id(kategorie, m.group("text").strip()) == fakt_id:
+            del lines[i]
+            path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+            return True
+    return False
+
+
+def profil_as_text(profil: dict[str, Any]) -> str:
+    if not profil["fakten"]:
+        return "Keine persönlichen Infos hinterlegt."
+    return "\n".join(f"- [{f['kategorie_label']}] {f['text']}" + (f" (notiert {f['datum']})" if f["datum"] else "")
+                     for f in profil["fakten"])
 
 
 # --------------------------------------------------------------------------- Eintraege
@@ -372,13 +548,16 @@ def read_brain(vermittler_nr: int, limit: int | None = None, seit: date | None =
     return {
         "hub": {"datei": hub_rel(vermittler_nr), "inhalt": hub_text},
         "zusammenfassung": _get_block(hub_text, "zusammenfassung") if hub_text else None,
+        "profil": read_profil(vermittler_nr),
         "eintraege": entries,
     }
 
 
 def brain_as_text(brain: dict[str, Any]) -> str:
-    """Konkateniert Hub + Eintraege zu einem LLM-freundlichen Kontextdokument."""
+    """Konkateniert Hub + Profil + Eintraege zu einem LLM-freundlichen Kontextdokument."""
     parts = [f"=== HUB: {brain['hub']['datei']} ===", brain["hub"]["inhalt"]]
+    if brain.get("profil"):
+        parts += [f"\n=== PERSOENLICHES PROFIL: {brain['profil']['pfad']} ===", profil_as_text(brain["profil"])]
     for e in brain["eintraege"]:
         parts += [f"\n=== EINTRAG: {e['datei']} ===", e["inhalt"]]
     return "\n".join(parts)
@@ -418,3 +597,88 @@ def search(query: str, limit: int = 20) -> list[dict[str, Any]]:
     hits.sort(key=lambda h: h["datei"], reverse=True)
     hits.sort(key=lambda h: h["ist_hub"])
     return hits[:limit]
+
+
+# --------------------------------------------------------------------------- Netz (Graph-Ansicht)
+
+_WIKILINK_RE = re.compile(r"!?\[\[([^\]|#^]+)")
+
+
+def _wikilinks(text: str) -> set[str]:
+    return {m.group(1).strip() for m in _WIKILINK_RE.finditer(text)}
+
+
+def netz(v: dict[str, Any], max_eintraege: int = 15, max_fakten: int = 15) -> dict[str, Any]:
+    """Lokaler Graph um einen Vermittler – wie die lokale Graph-Ansicht in Obsidian.
+
+    Knoten: Hub, Profil + persoenliche Infos, Eintraege, Betreuer/Filiale (aus der DB) sowie
+    Notizen, die per [[Wikilink]] verlinkt sind oder auf den Vermittler verlinken (Backlinks).
+    """
+    nr = v["vermittler_nr"]
+    name = note_name(nr)
+    vault = Path(settings.vault_path).resolve()
+    nodes: dict[str, dict[str, Any]] = {}
+    edges: list[dict[str, str]] = []
+
+    def node(nid: str, label: str, typ: str, rel: str | None = None, detail: str | None = None) -> str:
+        nodes.setdefault(nid, {"id": nid, "label": label, "typ": typ,
+                               "uri": obsidian_uri(rel) if rel else None, "detail": detail})
+        return nid
+
+    def edge(a: str, b: str) -> None:
+        if a != b and {"von": a, "nach": b} not in edges and {"von": b, "nach": a} not in edges:
+            edges.append({"von": a, "nach": b})
+
+    hub = node(name, v["anzeigename"], "vermittler", hub_rel(nr), v.get("firma_filiale"))
+
+    profil = read_profil(nr)
+    pid = node(f"{name} Profil", "Persönliches Profil", "profil", profil["pfad"], f"{len(profil['fakten'])} Infos")
+    edge(hub, pid)
+    for f in profil["fakten"][:max_fakten]:
+        edge(pid, node(f"fakt:{f['id']}", f["text"], "fakt", None, f["kategorie_label"]))
+
+    eigene_texte: list[str] = []
+    for e in list_entries(nr)[:max_eintraege]:
+        fm = e["frontmatter"]
+        stem = Path(e["datei"]).stem
+        label = EINTRAG_TYPEN.get(str(fm.get("typ", "")), "Eintrag")
+        edge(hub, node(stem, str(fm.get("titel", stem)), "eintrag", e["datei"], f"{label} · {fm.get('datum', '')}"))
+        eigene_texte.append(e["inhalt"])
+
+    b = v.get("betreuung") or {}
+    if b.get("name"):
+        edge(hub, node(f"betreuer:{b.get('mitarbeiter_id')}", b["name"], "betreuer", None, "Betreuer"))
+    if b.get("filiale"):
+        fid = node(f"filiale:{b.get('filial_nr')}", b["filiale"], "filiale", None,
+                   f"Filiale · {b.get('marktgebiet') or ''}".strip(" ·"))
+        edge(hub, fid)
+        if b.get("name"):
+            edge(f"betreuer:{b.get('mitarbeiter_id')}", fid)
+
+    # Wikilinks aus eigenen Notizen und Backlinks aus dem restlichen Vault
+    hub_path, profil_path = abs_path(hub_rel(nr)), abs_path(profil_rel(nr))
+    for p in (hub_path, profil_path):
+        if p.exists():
+            eigene_texte.append(p.read_text(encoding="utf-8"))
+    ausgehend = set().union(*(_wikilinks(t) for t in eigene_texte)) if eigene_texte else set()
+    eigener_ordner = abs_path(folder_rel(nr))
+    dateien = {p.stem: p for p in vault.rglob("*.md") if ".obsidian" not in p.parts and ".trash" not in p.parts}
+    for stem, p in dateien.items():
+        if eigener_ordner in p.parents:
+            continue
+        rel = p.relative_to(vault).as_posix()
+        typ = "vermittler-link" if re.fullmatch(r"VM-\d+", stem) else "notiz"
+        if stem in ausgehend or Path(stem).name in {Path(a).name for a in ausgehend}:
+            edge(hub, node(stem, stem, typ, rel, "verlinkt"))
+            continue
+        text = p.read_text(encoding="utf-8", errors="ignore")
+        if f"[[{name}" in text:
+            # Backlink: Eintraege anderer Vermittler zeigen auf deren Hub
+            m = re.match(r"Vermittler/(VM-\d+)/", rel)
+            if m and m.group(1) != stem:
+                edge(hub, node(m.group(1), m.group(1), "vermittler-link", f"Vermittler/{m.group(1)}/{m.group(1)}.md",
+                               "erwähnt diesen Vermittler"))
+            else:
+                edge(hub, node(stem, stem, typ, rel, "verlinkt hierher"))
+
+    return {"zentrum": hub, "knoten": list(nodes.values()), "kanten": edges}
