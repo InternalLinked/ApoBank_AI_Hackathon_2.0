@@ -20,9 +20,37 @@ logger = logging.getLogger("apobank.copilot")
 
 
 SYSTEM_INSTRUCTIONS = """
-Du bist der apoBank Vermittler-Copilot. Antworte auf Deutsch, knapp, konkret und
-freundlich. Verwende fuer Fakten zu Vermittlern, Gespraechen oder Kennzahlen immer
-die bereitgestellten Tools. Erfinde keine Daten. Nenne die verwendete Quelle kurz.
+Du bist der apoBank Vermittler-Copilot fuer Vertriebsmitarbeitende. Antworte auf Deutsch,
+knapp, konkret und freundlich (du-Form). Verwende fuer Fakten zu Vermittlern, Gespraechen
+oder Kennzahlen immer die bereitgestellten Tools. Erfinde keine Daten, Namen oder Links.
+
+## Antwortformat (Markdown, wird in der Oberflaeche gerendert)
+- Beginne mit der Kernaussage in einem Satz – ohne Einleitung wie "Gerne!" oder "Hier ist ...".
+- Struktur nur, wenn sie hilft: kurze Antworten (1–3 Saetze) bleiben Fliesstext. Laengere
+  Antworten gliederst du mit `###`-Zwischenueberschriften (nie `#` oder `##`) und Aufzaehlungen.
+- **Fett** fuer das Wichtigste: Namen, Kennzahlen, Fristen, Entscheidungen. Hoechstens
+  2–3 Hervorhebungen pro Absatz, sonst verliert es die Wirkung. *Kursiv* fuer Nebeninfos.
+- Tabellen fuer Vergleiche und Ranglisten ab 3 Eintraegen (z. B. | # | Vermittler | Volumen 2025 |).
+  Zahlen deutsch formatieren: 1.250.000 €, 12,5 %. Rechne nicht selbst – nutze nur Tool-Zahlen.
+- Hinweise, Risiken oder Datenluecken als Zitat: `> **Hinweis:** 2026 ist noch nicht abgeschlossen.`
+- Offene Aufgaben als Liste mit **Faelligkeit** und Verantwortlichem, falls bekannt.
+- Keine Emojis, keine Codebloecke, kein HTML.
+
+## Links
+- Setze Links IMMER als Markdown-Hyperlink mit sprechendem Text: `[Obsidian-Akte von Jens Weber](obsidian://...)`,
+  `[jens.weber@beispiel.de](mailto:jens.weber@beispiel.de)`. Nie nackte URLs, nie den Link-Text "hier".
+- Verwende nur URLs, die exakt so in Tool-Ergebnissen stehen (Felder `links`, `uri`, `akte_link`).
+  Erfinde oder veraendere keine URLs. E-Mail-Adressen aus der Akte als `mailto:`-Link.
+- Wenn du eine Partnerakte zeigst oder etwas gespeichert hast, verlinke am Ende die Obsidian-Akte
+  bzw. die gespeicherte Notiz bzw. das Profil.
+
+## Vorlagen
+- Partnerakte / Zusammenfassung: Kernaussage → `### Ueberblick` (Firma, Status, Betreuer, Filiale)
+  → `### Geschaeft` (letzte Jahre, kurze Einordnung) → `### Persoenliches` (falls vorhanden)
+  → `### Offene Punkte` → Links.
+- Gespraechsvorbereitung: Kernaussage → `### Gespraechseinstieg` (1–2 persoenliche Anknuepfungspunkte
+  aus dem Profil) → `### Zahlen & Entwicklung` → `### Offene Punkte & Ziele fuer das Gespraech` → Links.
+- Nach dem Speichern: ein Satz "Gespeichert:" + kurze Liste, was wo abgelegt wurde, + Link.
 
 Speichern: Nennt der Nutzer neue Informationen zu einem eindeutig identifizierten
 Vermittler (Gespraechsinhalte, Vereinbarungen, naechste Schritte, Persoenliches),
@@ -356,7 +384,8 @@ def _im_obsidian_speichern(conn: sqlite3.Connection, nr: int, angaben: list[dict
             continue
         if gruppe == "persoenlich":
             fakt = obsidian.add_profil_fakt(v, wert, _profil_kategorie(label, wert))
-            gespeichert.append(f"Profil/{fakt['kategorie_label']}: {wert}")
+            gespeichert.append({"ziel": f"Persoenliches Profil / {fakt['kategorie_label']}", "info": wert,
+                                "uri": obsidian.read_profil(nr)["uri"]})
         else:
             notiz.append(item)
         findings.append({"id": f"saved-{index}", "group": gruppe, "label": label, "value": wert,
@@ -372,9 +401,10 @@ def _im_obsidian_speichern(conn: sqlite3.Connection, nr: int, angaben: list[dict
             "INSERT INTO obsidian_eintrag (vermittler_nr, typ, titel, datum, datei, autor, quelle) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (nr, res["typ"], res["titel"], res["datum"], res["datei"], "copilot", "chat"),
         )
-        gespeichert.append(f"Notiz: {res['datei']}")
+        gespeichert.append({"ziel": "Notiz", "titel": res["titel"], "uri": res["uri"]})
     logger.info("Copilot hat fuer VM-%s gespeichert: %s", nr, gespeichert)
-    return {"status": "gespeichert", "gespeichert": gespeichert}, nr, findings, "Obsidian"
+    return ({"status": "gespeichert", "gespeichert": gespeichert, "akte_link": obsidian.reference(nr)["uri"]},
+            nr, findings, "Obsidian")
 
 
 def _execute_tool(conn: sqlite3.Connection, name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any], int | None, list[dict[str, str]], str | None]:
@@ -386,11 +416,21 @@ def _execute_tool(conn: sqlite3.Connection, name: str, arguments: dict[str, Any]
         if profile is None:
             return {"fehler": "Vermittler nicht gefunden"}, None, [], "Partnerakte"
         profil = obsidian.read_profil(nr)
-        profile = {**profile, "persoenliches_profil": [
+        email = (profile.get("kontakt") or {}).get("email")
+        links = {
+            "obsidian_akte": profile["obsidian"]["uri"],
+            "persoenliches_profil": profil["uri"],
+        }
+        if email:
+            links["email"] = f"mailto:{email}"
+        profile = {**profile, "links": links, "persoenliches_profil": [
             {"kategorie": f["kategorie_label"], "info": f["text"], "notiert_am": f["datum"]} for f in profil["fakten"]]}
         return profile, nr, [], "Partnerakte"
     if name == "suche_notizen":
-        return {"items": obsidian.search(str(arguments["suchbegriff"]), limit=8)}, None, [], "Gespraechsnotizen"
+        treffer = obsidian.search(str(arguments["suchbegriff"]), limit=8)
+        for t in treffer:
+            t["uri"] = obsidian.obsidian_uri(t["datei"])
+        return {"items": treffer}, None, [], "Gespraechsnotizen"
     if name == "portfolio_ueberblick":
         return _portfolio_ueberblick(conn), None, [], "Partnerdatenbank"
     if name == "im_obsidian_speichern":

@@ -374,3 +374,19 @@ def test_copilot_speichert_nichts_bei_unbekanntem_vermittler(client):
     finally:
         conn.close()
     assert "fehler" in output and nr is None and findings == []
+
+
+def test_copilot_werkzeuge_liefern_links(client):
+    from backend import db, openai_copilot
+    conn = db.connect()
+    try:
+        akte, nr, _, _ = openai_copilot._execute_tool(conn, "hole_partnerakte", {"vermittler_nr": 4251})
+        gespeichert, *_ = openai_copilot._execute_tool(conn, "im_obsidian_speichern", {"vermittler_nr": 4251, "angaben": [
+            {"gruppe": "persoenlich", "label": "Haustiere", "wert": "Hat einen Hund namens Tim", "quelle": "Chat"}]})
+    finally:
+        conn.close()
+    assert nr == 4251
+    assert akte["links"]["obsidian_akte"].startswith("obsidian://open?vault=")
+    assert "Profil" in akte["links"]["persoenliches_profil"]
+    assert all(e["uri"].startswith("obsidian://") for e in gespeichert["gespeichert"])
+    assert gespeichert["akte_link"].startswith("obsidian://")

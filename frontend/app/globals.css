@@ -398,3 +398,31 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 .inspector-panel > * { flex-shrink: 0; }
 .inspector-panel .inspector-scroll { flex: none; overflow: visible; }
 .inspector-panel .inspector-heading { position: sticky; z-index: 2; top: 0; background: #fff; }
+
+/* Copilot-Antworten als Markdown */
+.message-markdown { color: #425459; font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
+.message-markdown > :first-child { margin-top: 0; }
+.message-markdown > :last-child { margin-bottom: 0; }
+.message-markdown p { margin: 0 0 8px; }
+.message-markdown h1, .message-markdown h2, .message-markdown h3, .message-markdown h4 { margin: 14px 0 6px; color: #17365f; font-size: 12.5px; font-weight: 700; letter-spacing: -.01em; }
+.message-markdown h1, .message-markdown h2 { font-size: 13.5px; }
+.message-markdown strong { color: #17365f; font-weight: 650; }
+.message-markdown em { color: #5d6f86; }
+.message-markdown ul, .message-markdown ol { margin: 0 0 8px; padding-left: 18px; }
+.message-markdown li { margin: 2px 0; }
+.message-markdown li::marker { color: #6f8db8; }
+.message-markdown li > p { margin: 0; }
+.message-markdown blockquote { margin: 8px 0; padding: 7px 10px; border-left: 3px solid #e2be72; border-radius: 0 8px 8px 0; color: #6b5a33; background: #fffaf0; }
+.message-markdown blockquote p { margin: 0; }
+.message-markdown code { padding: 1px 4px; border-radius: 4px; background: #f1f5fb; color: #23446f; font-size: 11px; }
+.message-markdown hr { margin: 10px 0; border: 0; border-top: 1px solid #e8eef6; }
+.message-markdown .md-link { color: #1f5bb0; font-weight: 600; text-decoration: underline; text-decoration-color: rgba(31,91,176,.35); text-underline-offset: 2px; }
+.message-markdown .md-link:hover { text-decoration-color: currentColor; }
+.message-markdown .md-link-obsidian::before { content: "◆ "; color: #8f6ad1; font-size: 9px; }
+.md-table-wrap { overflow-x: auto; margin: 6px 0 10px; border: 1px solid #e3e9f2; border-radius: 8px; }
+.message-markdown table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.message-markdown th { padding: 6px 8px; background: #f5f8fd; color: #23446f; font-weight: 650; text-align: left; white-space: nowrap; }
+.message-markdown td { padding: 5px 8px; border-top: 1px solid #eef2f8; }
+.message-markdown td:not(:first-child), .message-markdown th:not(:first-child) { white-space: nowrap; }
+.message-markdown ul { list-style: disc; }
+.message-markdown ol { list-style: decimal; }
