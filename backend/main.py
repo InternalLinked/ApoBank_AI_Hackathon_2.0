@@ -10,7 +10,7 @@ import logging
 import re
 import sqlite3
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 from datetime import date
 from pathlib import Path
 from typing import Any, Literal
@@ -30,8 +30,12 @@ from .schemas import (ChatKonversationCreate, ChatNachrichtIn, EintragIn, Gescha
                       SqlQueryIn, VermittlerCreate, VermittlerUpdate, ZusammenfassungIn)
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(app: FastAPI):
     db.init_db()
+    with closing(db.connect()) as conn:
+        konto, antworten = _startvorschlaege(conn)
+    app.state.betreuerkonto = konto
+    app.state.startvorschlaege = antworten
     yield
 
 
@@ -561,6 +565,92 @@ def ueberblick(marktgebiet: str | None = None, filial_nr: int | None = None, mit
     }
 
 
+def _analyse_startantwort(titel: str, beschreibung: str, spalten: list[str], zeilen: list[list[Any]],
+                          *, diagramm: bool = False) -> openai_copilot.CopilotReply:
+    analysen = []
+    if zeilen:
+        analysen.append({
+            "titel": titel, "sql": "", "spalten": spalten, "zeilen": zeilen, "anzahl": len(zeilen),
+            "diagramm": {"typ": "balken" if diagramm else "tabelle",
+                         "x": spalten[0], "y": spalten[-1], "einheit": "eur" if diagramm else "keine"},
+        })
+    return openai_copilot.CopilotReply(
+        content=f"**{titel}**\n\n{beschreibung}",
+        configured=bool(settings.openai_api_key), analysen=analysen,
+    )
+
+
+def _startvorschlaege(conn: Conn) -> tuple[str | None, dict[str, openai_copilot.CopilotReply]]:
+    konto = conn.execute("SELECT name FROM betreuer WHERE mitarbeiter_id = ?",
+                         (settings.betreuerkonto_id,)).fetchone()
+    top = ranking(jahr=2025, mitarbeiter_id=settings.betreuerkonto_id, limit=10, conn=conn)["items"] if konto else []
+    rueckgaenge = wachstum(2024, 2025, richtung="asc", min_basis_eur=0, limit=10, conn=conn)["items"]
+    regionen = ranking(gruppe="marktgebiet", jahr=2025, limit=500, conn=conn)["items"]
+    portfolio = ueberblick(conn=conn)
+
+    def name(row: dict[str, Any]) -> str:
+        return " ".join(str(row[key]) for key in ("vorname", "name") if row.get(key)) or str(row["vermittler_nr"])
+
+    antworten = {
+        "top10": _analyse_startantwort(
+            "Meine Top 10 nach Kreditvolumen 2025",
+            f"{len(top)} Vermittler aus dem Portfolio von {konto['name']}." if top else
+            ("Für dieses Betreuerkonto liegen 2025 keine Volumendaten vor." if konto else
+             "Dem angezeigten Konto ist kein Betreuer zugeordnet."),
+            ["Vermittler", "Volumen (EUR)"], [[name(r), r["volumen_eur"]] for r in top], diagramm=True,
+        ),
+        "einbrueche": _analyse_startantwort(
+            "Größte Volumeneinbrüche 2024 → 2025",
+            "Bis zu zehn Vermittler, sortiert nach dem Rückgang in Euro.",
+            ["Vermittler", "2024 (EUR)", "2025 (EUR)", "Veränderung (EUR)"],
+            [[name(r), r["volumen_von"], r["volumen_bis"], r["delta_eur"]] for r in rueckgaenge if r["delta_eur"] < 0],
+            diagramm=True,
+        ),
+        "marktgebiete": _analyse_startantwort(
+            "Kreditvolumen 2025 nach Marktgebiet", "Das Diagramm vergleicht die Marktgebiete nach Kreditvolumen.",
+            ["Marktgebiet", "Volumen (EUR)"], [[r["marktgebiet"], r["volumen_eur"]] for r in regionen], diagramm=True,
+        ),
+        "portfolio": _analyse_startantwort(
+            "Portfolio-Überblick", f"Das Portfolio umfasst {portfolio['anzahl_vermittler']} Vermittler.",
+            ["Merkmal", "Gruppe", "Vermittler"],
+            [[merkmal, gruppe, anzahl] for merkmal, schluessel in
+             (("Status", "nach_status"), ("Marktgebiet", "nach_marktgebiet"))
+             for gruppe, anzahl in portfolio[schluessel].items()],
+        ),
+    }
+
+    partner = db.get_vermittler_full(conn, 4251)
+    gespraech = "Für Vermittler 4251 liegt keine Partnerakte vor."
+    if partner:
+        brain = obsidian.read_brain(4251, limit=3)
+        zeilen = [f"**Gespräch mit {partner['anzeigename']}**"]
+        if partner["geschaeftszahlen"]:
+            zahlen = next((r for r in partner["geschaeftszahlen"] if r["jahr"] == 2025 and r["sparte"] == "gesamt"), None)
+            if zahlen:
+                volumen = f"{zahlen['volumen_eur']:,.0f}".replace(",", ".")
+                zeilen.append(f"Kreditvolumen 2025: {volumen} EUR bei {zahlen['anzahl_darlehen']} Darlehen.")
+        if brain["zusammenfassung"]:
+            zeilen.append(brain["zusammenfassung"])
+        notizen = [f"- [{e['frontmatter'].get('titel') or 'Eintrag'}]({obsidian.obsidian_uri(e['datei'])})"
+                   for e in brain["eintraege"]]
+        zeilen.append("Letzte Einträge:\n" + "\n".join(notizen) if notizen else "Es liegen keine Gesprächsnotizen vor.")
+        zeilen.append("**Themen für das Gespräch**\n- Geschäftsentwicklung und Ziele besprechen.\n- Offene Maßnahmen aus den letzten Einträgen klären.")
+        gespraech = "\n\n".join(zeilen)
+    antworten["gespraech"] = openai_copilot.CopilotReply(
+        content=gespraech, configured=bool(settings.openai_api_key), vermittler_nr=4251 if partner else None,
+    )
+
+    treffer = obsidian.search("Praxisfinanzierung", limit=10, nur_eintraege=True)
+    notizen = ["**Gesprächsnotizen zu Praxisfinanzierung**"]
+    notizen.extend(f"- [Notiz öffnen]({obsidian.obsidian_uri(t['datei'])}) · {t['ausschnitt']}" for t in treffer)
+    if not treffer:
+        notizen.append("Keine passenden Gesprächsnotizen gefunden.")
+    antworten["notizen"] = openai_copilot.CopilotReply(
+        content="\n\n".join(notizen), configured=bool(settings.openai_api_key),
+    )
+    return (konto["name"] if konto else None), antworten
+
+
 # =========================================================================== Chat / OpenAI
 
 CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9-]{16,64}$")
@@ -583,7 +673,7 @@ def _eigener_chat(conn: Conn, conversation_id: str, client: str) -> sqlite3.Row:
 
 
 @app.get("/api/chat/workspace", tags=["Chat"], summary="Gespeicherte Chatverlaeufe dieses Browsers")
-def get_chat_workspace(client: str = Depends(client_id), conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+def get_chat_workspace(request: Request, client: str = Depends(client_id), conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
     conversations = db.rows_to_dicts(conn.execute(
         f"SELECT {CHAT_KONVERSATION_FIELDS} FROM chat_konversation c WHERE c.client_id = ? "
         "ORDER BY c.aktualisiert_am DESC, c.erstellt_am DESC", (client,)
@@ -604,6 +694,7 @@ def get_chat_workspace(client: str = Depends(client_id), conn: Conn = Depends(db
     return {
         "conversations": conversations,
         "messages_by_conversation": messages,
+        "betreuerkonto": request.app.state.betreuerkonto,
         "openai_configured": bool(settings.openai_api_key),
     }
 
@@ -640,7 +731,7 @@ def delete_chat_conversation(conversation_id: str, client: str = Depends(client_
 
 @app.post("/api/chat/conversations/{conversation_id}/messages", tags=["Chat"],
           summary="Nachricht speichern und ueber OpenAI mit Datenwerkzeugen beantworten")
-def send_chat_message(conversation_id: str, body: ChatNachrichtIn, client: str = Depends(client_id),
+def send_chat_message(conversation_id: str, body: ChatNachrichtIn, request: Request, client: str = Depends(client_id),
                       conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
     conversation = _eigener_chat(conn, conversation_id, client)
 
@@ -654,7 +745,14 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, client: str =
         (conversation_id,),
     ).fetchall()
     history = [{"role": row["rolle"], "content": row["inhalt"]} for row in reversed(history_rows)]
-    reply = openai_copilot.antwort_auf_nachricht(conn, history)
+    if body.startvorschlag:
+        vorbereitet = request.app.state.startvorschlaege[body.startvorschlag]
+        reply = openai_copilot.CopilotReply(
+            content=vorbereitet.content, configured=vorbereitet.configured, vermittler_nr=vorbereitet.vermittler_nr,
+            analysen=[{**analyse, "id": uuid4().hex[:12]} for analyse in vorbereitet.analysen],
+        )
+    else:
+        reply = openai_copilot.antwort_auf_nachricht(conn, history)
     # Vermittlernamen klickbar machen ([Name](partner:<nr>) -> Frontend oeffnet die Partnerakte)
     reply.content = vermittler_links.verlinke(
         conn, reply.content, [*reply.erwaehnte_nrs, reply.vermittler_nr, *(k.get("vermittler_nr") for k in reply.kandidaten)])

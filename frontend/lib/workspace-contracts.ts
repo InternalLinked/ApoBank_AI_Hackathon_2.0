@@ -151,7 +151,10 @@ export type ObsidianGraph = {
   edges: Array<{ from: string; to: string }>;
 };
 
+export type StartSuggestion = "top10" | "einbrueche" | "gespraech" | "marktgebiete" | "portfolio" | "notizen";
+
 export type WorkspaceSnapshot = {
+  accountName: string | null;
   conversations: Conversation[];
   messagesByConversation: Record<string, ChatMessage[]>;
   partner: PartnerSummary | null;
@@ -212,7 +215,7 @@ export interface WorkspaceApi {
   transcribe(pcm: Blob, sampleRate: number, language?: string): Promise<Transcription>;
   createConversation(): Promise<Conversation>;
   deleteConversation(conversationId: string): Promise<void>;
-  sendMessage(conversationId: string, content: string): Promise<ChatReply>;
+  sendMessage(conversationId: string, content: string, startSuggestion?: StartSuggestion): Promise<ChatReply>;
   getPartnerDetail(vermittlerNr: number): Promise<PartnerDetail>;
   createEntry(input: ManualEntryInput): Promise<SavedEntry>;
   confirmFindings(conversationId: string, partner: PartnerSummary, findings: ExtractedFinding[]): Promise<void>;

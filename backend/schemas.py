@@ -106,3 +106,4 @@ class ChatKonversationCreate(BaseModel):
 
 class ChatNachrichtIn(BaseModel):
     inhalt: str = Field(min_length=1, max_length=8_000)
+    startvorschlag: Literal["top10", "einbrueche", "gespraech", "marktgebiete", "portfolio", "notizen"] | None = None

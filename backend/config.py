@@ -31,6 +31,7 @@ class Settings:
         for origin in os.getenv("APOBANK_CORS_ORIGINS", "http://127.0.0.1:3000,http://localhost:3000").split(",")
         if origin.strip()
     )
+    betreuerkonto_id: str = os.getenv("APOBANK_BETREUERKONTO_ID", "MGK76244")
     sql_max_rows: int = 1000
     sql_timeout_s: float = 5.0
 
