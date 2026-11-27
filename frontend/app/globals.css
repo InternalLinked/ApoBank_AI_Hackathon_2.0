@@ -493,3 +493,8 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 .message-markdown td:not(:first-child), .message-markdown th:not(:first-child) { white-space: nowrap; }
 .message-markdown ul { list-style: disc; }
 .message-markdown ol { list-style: decimal; }
+/* Klickbare Vermittlernamen im Chat (öffnen die Partnerakte) */
+.message-markdown .md-partner-link { display: inline; margin: 0; padding: 0 2px; border: 0; border-radius: 4px; background: #edf4ff; color: #17427f; font: inherit; font-weight: 650; cursor: pointer; box-shadow: inset 0 -1px 0 rgba(23,66,127,.25); transition: background .15s; }
+.message-markdown .md-partner-link:hover { background: #dbe8fb; }
+.message-markdown .md-partner-link:focus-visible { outline: 2px solid #5b8fd6; outline-offset: 1px; }
+.message-markdown .md-partner-link:disabled { cursor: default; }

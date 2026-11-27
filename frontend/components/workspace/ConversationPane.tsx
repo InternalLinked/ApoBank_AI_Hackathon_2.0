@@ -17,11 +17,13 @@ type ConversationPaneProps = {
   onOpenChats: () => void;
   onOpenDetails: () => void;
   onSelectCandidate: (candidate: PartnerCandidate) => void;
+  /** Klick auf einen verlinkten Vermittlernamen im Antworttext. */
+  onOpenPartner: (vermittlerNr: number, name: string) => void;
   onTranscribe: (pcm: Blob, sampleRate: number) => Promise<string>;
   onError: (message: string) => void;
 };
 
-export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, onOpenDetails, onSelectCandidate, onTranscribe, onError }: ConversationPaneProps) {
+export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, onOpenDetails, onSelectCandidate, onOpenPartner, onTranscribe, onError }: ConversationPaneProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -109,7 +111,7 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
               <div className="message-body">
                 <div className="message-meta"><strong>{message.role === "assistant" ? "Partner-Copilot" : "Du"}</strong><span>{message.createdAt}</span></div>
                 <div className={`message-card ${message.role === "user" ? "user-message-card" : "assistant-message-card"}`}>
-                  {message.role === "assistant" ? <MessageMarkdown content={message.content} /> : <p>{message.content}</p>}
+                  {message.role === "assistant" ? <MessageMarkdown content={message.content} onOpenPartner={onOpenPartner} /> : <p>{message.content}</p>}
                   {message.metrics && <div className="metric-grid">{message.metrics.map((metric) => <div className={`metric-card tone-${metric.tone ?? "green"}`} key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.detail}</small></div>)}</div>}
                   {message.bullets && <ul className="message-bullets">{message.bullets.map((bullet) => <li key={bullet}><span className="bullet-dot" />{bullet}</li>)}</ul>}
                   {message.candidates && (

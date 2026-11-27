@@ -124,7 +124,8 @@ def test_analyse_agent_bereitet_sql_vor_und_chat_nutzt_es(client, monkeypatch):
     assert analyse["spalten"] == ["vermittler", "volumen_eur"]
     # Testdaten 2025: Otto 14.902.000 > Baumann 10.773.001 > Huber 1.000.000 – Zahl kommt aus SQL, nicht geraten
     assert analyse["zeilen"][0] == ["Martin Otto", 14902000]
-    assert body["message"]["content"] == "Top-Vermittler 2025 ist Martin Otto mit 14902000 EUR."
+    # Namen aus der DB werden klickbar (oeffnen die Partnerakte)
+    assert body["message"]["content"] == "Top-Vermittler 2025 ist [Martin Otto](partner:40893) mit 14902000 EUR."
 
     # SQL ist mit der Nachricht gespeichert (Zwischenspeicher fuer den Analyse-Tab)
     verlauf = client.get("/api/chat/workspace", headers=BROWSER_A).json()["messages_by_conversation"][chat_id]
@@ -502,3 +503,34 @@ def test_copilot_werkzeuge_liefern_links(client):
     assert "Profil" in akte["links"]["persoenliches_profil"]
     assert all(e["uri"].startswith("obsidian://") for e in gespeichert["gespeichert"])
     assert gespeichert["akte_link"].startswith("obsidian://")
+
+
+def test_vermittlernamen_werden_verlinkt(client):
+    from backend import db, vermittler_links
+    conn = db.connect()
+    try:
+        text = ("**Dr. Hans Baumann** ist Top-Partner. Bereits verlinkt: [Dr. Hans Baumann](obsidian://x), "
+                "`Dr. Hans Baumann` bleibt Code. Unbekannt: Max Mustermann.")
+        out = vermittler_links.verlinke(conn, text)
+        # Mehrdeutigkeit: zwei Vermittler gleichen Namens -> nur mit Werkzeug-Hinweis verlinken
+        conn.execute("INSERT INTO vermittler (vermittler_nr, vorname, name, status) VALUES (777001, 'Hans', 'Baumann', 'aktiv')")
+        conn.execute("INSERT INTO vermittler (vermittler_nr, vorname, name, status) VALUES (777002, 'Hans', 'Baumann', 'aktiv')")
+        mehrdeutig = vermittler_links.verlinke(conn, "Hans Baumann")
+        eindeutig = vermittler_links.verlinke(conn, "Hans Baumann", [777002])
+        conn.rollback()
+    finally:
+        conn.close()
+    assert "**[Dr. Hans Baumann](partner:4251)**" in out
+    assert "[Dr. Hans Baumann](obsidian://x)" in out and "`Dr. Hans Baumann`" in out
+    assert "Max Mustermann" in out and "partner:" not in out.split("Unbekannt:")[1]
+    assert mehrdeutig == "Hans Baumann"
+    assert eindeutig == "[Hans Baumann](partner:777002)"
+    assert vermittler_links.nummern_in({"items": [{"vermittler_nr": 5}], "spalten": ["vermittler_nr", "x"],
+                                         "zeilen": [[6, 1]]}) == {5, 6}
+
+
+def test_chat_antwort_enthaelt_partner_links(client):
+    conversation = client.post("/api/chat/conversations", json={"titel": "Neue Unterhaltung"}, headers=BROWSER_A).json()
+    reply = client.post(f"/api/chat/conversations/{conversation['id']}/messages",
+                        json={"inhalt": "Zeig mir die Partnerakte von Hans Baumann"}, headers=BROWSER_A).json()
+    assert "[Dr. Hans Baumann](partner:4251)" in reply["message"]["content"]

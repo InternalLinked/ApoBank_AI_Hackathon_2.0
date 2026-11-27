@@ -211,6 +211,15 @@ export function Workspace() {
     setMobileDrawer((current) => (current === null && window.matchMedia("(max-width: 900px)").matches ? "details" : current));
   }
 
+  /** Klick auf einen Vermittlernamen im Chat-Text: Partnerakte rechts öffnen. */
+  function openPartnerFromLink(vermittlerNr: number, name: string) {
+    if (snapshot.partner?.vermittlerNr !== vermittlerNr) {
+      selectCandidate({ vermittlerNr, name });
+      return;
+    }
+    setMobileDrawer((current) => (current === null && window.matchMedia("(max-width: 900px)").matches ? "details" : current));
+  }
+
   function selectConversation(conversationId: string) {
     setActiveConversationId(conversationId);
     const latest = [...(snapshot.messagesByConversation[conversationId] ?? [])].reverse().find((message) => message.role === "assistant");
@@ -223,7 +232,7 @@ export function Workspace() {
     <div className="workspace-shell">
       {mobileDrawer && <button className="mobile-backdrop" aria-label="Seitenleiste schließen" onClick={() => setMobileDrawer(null)} />}
       <ChatSidebar conversations={snapshot.conversations} activeConversationId={activeConversationId} mobileOpen={mobileDrawer === "chats"} onCloseMobile={() => setMobileDrawer(null)} onSelect={selectConversation} onNewConversation={createConversation} onDelete={deleteConversation} />
-      <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} onOpenDetails={() => setMobileDrawer("details")} onSelectCandidate={selectCandidate} onTranscribe={transcribeAudio} onError={setToast} />
+      <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} onOpenDetails={() => setMobileDrawer("details")} onSelectCandidate={selectCandidate} onOpenPartner={openPartnerFromLink} onTranscribe={transcribeAudio} onError={setToast} />
       <InspectorPanel partner={snapshot.partner} partnerDetail={partnerDetail} findings={findings} mobileOpen={mobileDrawer === "details"} onCloseMobile={() => setMobileDrawer(null)} onSaveEntry={saveEntry} onConfirmFindings={confirmFindings} api={api} profileRefreshKey={profileRefreshKey} onError={setToast} />
       {toast && <div className="toast" role="status"><Icon name="check" size={16} />{toast}<button onClick={() => setToast("")} aria-label="Hinweis schließen"><Icon name="close" size={15} /></button></div>}
     </div>
