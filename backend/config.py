@@ -23,6 +23,8 @@ class Settings:
     upload_path: Path = Path(os.getenv("APOBANK_UPLOAD_PATH", BASE_DIR / "data" / "uploads"))
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+    # Modell des parallel laufenden Analyse-Agenten (SQL vorbereiten); Standard = Chat-Modell
+    openai_analyse_model: str = os.getenv("OPENAI_ANALYSE_MODEL") or os.getenv("OPENAI_MODEL", "gpt-5-mini")
     openai_timeout_s: float = float(os.getenv("OPENAI_TIMEOUT_S", "45"))
     cors_origins: tuple[str, ...] = tuple(
         origin.strip()

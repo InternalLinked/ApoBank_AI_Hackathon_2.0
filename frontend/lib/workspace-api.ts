@@ -1,4 +1,7 @@
 import type {
+  Analysis,
+  ChartType,
+  ChartUnit,
   ChatMessage,
   ChatReply,
   Conversation,
@@ -215,12 +218,43 @@ function candidatesFrom(value: unknown): PartnerCandidate[] {
     : [];
 }
 
+const CHART_TYPES: ChartType[] = ["balken", "linie", "tabelle"];
+const CHART_UNITS: ChartUnit[] = ["eur", "anzahl", "prozent", "keine"];
+
+function toAnalysis(value: unknown, createdAt: string): Analysis | null {
+  const item = record(value);
+  if (typeof item.id !== "string" || typeof item.sql !== "string") return null;
+  const columns = Array.isArray(item.spalten) ? item.spalten.map(String) : [];
+  const rows = Array.isArray(item.zeilen)
+    ? item.zeilen.filter(Array.isArray).map((row: unknown[]) => row.map((cell) => (typeof cell === "number" || typeof cell === "string" ? cell : cell == null ? null : String(cell))))
+    : [];
+  const chart = record(item.diagramm);
+  const type = CHART_TYPES.includes(chart.typ as ChartType) ? chart.typ as ChartType : "tabelle";
+  const unit = CHART_UNITS.includes(chart.einheit as ChartUnit) ? chart.einheit as ChartUnit : "keine";
+  return {
+    id: item.id,
+    title: String(item.titel ?? "Analyse"),
+    sql: item.sql,
+    columns,
+    rows,
+    rowCount: typeof item.anzahl === "number" ? item.anzahl : rows.length,
+    truncated: item.abgeschnitten === true,
+    chart: { type, x: String(chart.x ?? columns[0] ?? ""), y: String(chart.y ?? columns[columns.length - 1] ?? ""), unit },
+    createdAt,
+  };
+}
+
 function toMessage(value: unknown): ChatMessage {
   const item = record(value);
   const metadata = record(item.metadata);
   const candidates = candidatesFrom(metadata.kandidaten);
+  const createdAt = dateLabel(item.created_at);
+  const analyses = Array.isArray(metadata.analysen)
+    ? metadata.analysen.map((analysis) => toAnalysis(analysis, createdAt)).filter((analysis): analysis is Analysis => analysis !== null)
+    : [];
   return {
     candidates: candidates.length > 0 ? candidates : undefined,
+    analyses: analyses.length > 0 ? analyses : undefined,
     id: String(item.id ?? randomId()),
     role: item.role === "user" ? "user" : "assistant",
     content: String(item.content ?? ""),

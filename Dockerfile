@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend ./backend
 COPY data/Musterliste_apoBank.xlsx ./seed/Musterliste_apoBank.xlsx
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint
-RUN chmod +x /usr/local/bin/docker-entrypoint
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint && chmod +x /usr/local/bin/docker-entrypoint
 COPY --from=frontend-build /frontend/out ./frontend/out
 
 # SQLite, Obsidian-Vault und Uploads muessen bei ECS ausserhalb des Containers

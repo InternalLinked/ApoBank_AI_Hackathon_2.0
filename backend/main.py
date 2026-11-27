@@ -242,32 +242,14 @@ def get_werte(conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
     return res
 
 
-def _ro_authorizer(action: int, *_: Any) -> int:
-    allowed = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION,
-               getattr(sqlite3, "SQLITE_RECURSIVE", 33)}
-    return sqlite3.SQLITE_OK if action in allowed else sqlite3.SQLITE_DENY
-
-
 @app.post("/api/sql/query", tags=["Meta"], summary="Read-only SQL ausfuehren")
 def sql_query(body: SqlQueryIn) -> dict[str, Any]:
     """Fuehrt genau ein lesendes Statement (SELECT/WITH) aus. Schreibzugriffe, PRAGMA und ATTACH sind gesperrt.
     Nutze `GET /api/schema` fuer Tabellen/Spalten."""
-    conn = db.connect(readonly=True)
     try:
-        conn.set_authorizer(_ro_authorizer)
-        deadline = time.monotonic() + settings.sql_timeout_s
-        conn.set_progress_handler(lambda: int(time.monotonic() > deadline), 10_000)
-        try:
-            cur = conn.execute(body.sql, body.params or [])
-            rows = cur.fetchmany(body.max_rows + 1)
-        except (sqlite3.DatabaseError, sqlite3.ProgrammingError, sqlite3.Warning) as exc:
-            raise HTTPException(400, f"SQL-Fehler: {exc}") from exc
-        cols = [d[0] for d in cur.description or []]
-        truncated = len(rows) > body.max_rows
-        return {"spalten": cols, "zeilen": [list(r) for r in rows[: body.max_rows]],
-                "anzahl": min(len(rows), body.max_rows), "abgeschnitten": truncated}
-    finally:
-        conn.close()
+        return db.run_readonly_sql(body.sql, body.params, max_rows=body.max_rows)
+    except db.SqlFehler as exc:
+        raise HTTPException(400, f"SQL-Fehler: {exc}") from exc
 
 
 # =========================================================================== Stammdaten
@@ -664,6 +646,7 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, client: str =
         "openai_configured": reply.configured,
         "fehler": reply.fehler,
         "kandidaten": reply.kandidaten,  # Auswahl-Buttons bei mehreren Treffern; bleiben im Verlauf erhalten
+        "analysen": reply.analysen,      # SQL + Ergebnis + Diagramm-Angaben fuer den Tab "Analyse"
     }
     cursor = conn.execute(
         "INSERT INTO chat_nachricht (konversation_id, rolle, inhalt, metadaten_json) VALUES (?, 'assistant', ?, ?)",
@@ -679,7 +662,8 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, client: str =
         "SELECT id, rolle, inhalt, metadaten_json, erstellt_am FROM chat_nachricht WHERE id = ?", (cursor.lastrowid,)
     ).fetchone()
     return {"message": _chat_message(message), "partner": partner, "findings": reply.findings,
-            "openai_configured": reply.configured, "fehler": reply.fehler, "kandidaten": reply.kandidaten}
+            "openai_configured": reply.configured, "fehler": reply.fehler, "kandidaten": reply.kandidaten,
+            "analysen": reply.analysen}
 
 
 # =========================================================================== Obsidian-Gehirn
