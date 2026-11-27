@@ -61,6 +61,46 @@ def rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+class SqlFehler(ValueError):
+    """Ungueltiges oder unerlaubtes SQL (Syntax, Schreibversuch, Timeout, mehrere Statements)."""
+
+
+def _ro_authorizer(action: int, *_: Any) -> int:
+    allowed = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION,
+               getattr(sqlite3, "SQLITE_RECURSIVE", 33)}
+    return sqlite3.SQLITE_OK if action in allowed else sqlite3.SQLITE_DENY
+
+
+def run_readonly_sql(sql: str, params: list[Any] | dict[str, Any] | None = None,
+                     max_rows: int = 200) -> dict[str, Any]:
+    """Genau ein lesendes Statement ausfuehren – dreifach abgesichert, fuer API UND KI-Werkzeug.
+
+    1. DB im Modus `ro` geoeffnet, 2. Authorizer erlaubt nur SELECT/READ/FUNCTION (kein PRAGMA, ATTACH,
+    Schreiben), 3. Timeout `settings.sql_timeout_s`. Mehrere Statements lehnt sqlite3 selbst ab.
+    """
+    import time
+
+    conn = connect(readonly=True)
+    try:
+        conn.set_authorizer(_ro_authorizer)
+        deadline = time.monotonic() + settings.sql_timeout_s
+        conn.set_progress_handler(lambda: int(time.monotonic() > deadline), 10_000)
+        try:
+            cur = conn.execute(sql, params or [])
+            rows = cur.fetchmany(max_rows + 1)
+        except (sqlite3.DatabaseError, sqlite3.ProgrammingError, sqlite3.Warning) as exc:
+            raise SqlFehler(str(exc)) from exc
+        cols = [d[0] for d in cur.description or []]
+        return {
+            "spalten": cols,
+            "zeilen": [[v.hex() if isinstance(v, bytes) else v for v in r] for r in rows[:max_rows]],
+            "anzahl": min(len(rows), max_rows),
+            "abgeschnitten": len(rows) > max_rows,
+        }
+    finally:
+        conn.close()
+
+
 def split_list(value: str | None) -> list[str]:
     if not value:
         return []

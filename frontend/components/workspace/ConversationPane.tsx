@@ -1,6 +1,9 @@
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, Conversation, PartnerCandidate, PartnerSummary } from "@/lib/workspace-contracts";
+import { AnalysisPanel } from "./AnalysisPanel";
 import { Icon } from "./Icons";
+
+type PaneTab = "chat" | "analyse";
 
 type ConversationPaneProps = {
   conversation: Conversation | undefined;
@@ -16,11 +19,26 @@ type ConversationPaneProps = {
 
 export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, onOpenDetails, onSelectCandidate }: ConversationPaneProps) {
   const [value, setValue] = useState("");
+  const [tab, setTab] = useState<PaneTab>("chat");
+  const [focusedAnalysisId, setFocusedAnalysisId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Neueste Analyse zuerst
+  const analyses = useMemo(() => messages.flatMap((message) => message.analyses ?? []).reverse(), [messages]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+    if (tab === "chat") bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length, tab]);
+
+  // Anderer Chat gewählt → zurück zum Chat-Tab
+  useEffect(() => {
+    setTab("chat");
+    setFocusedAnalysisId(null);
+  }, [conversation?.id]);
+
+  function openAnalysis(id: string) {
+    setFocusedAnalysisId(id);
+    setTab("analyse");
+  }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -55,6 +73,21 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
         <button className="heading-action" type="button"><Icon name="more" size={18} /></button>
       </section>
 
+      <div className="pane-tabs" role="tablist" aria-label="Ansicht">
+        <button type="button" role="tab" id="tab-chat" aria-controls="panel-chat" aria-selected={tab === "chat"} className={tab === "chat" ? "is-active" : ""} onClick={() => setTab("chat")}>
+          <Icon name="chat" size={14} /> Chat
+        </button>
+        <button type="button" role="tab" id="tab-analyse" aria-controls="panel-analyse" aria-selected={tab === "analyse"} className={tab === "analyse" ? "is-active" : ""} onClick={() => setTab("analyse")}>
+          <Icon name="filter" size={14} /> Analyse{analyses.length > 0 && <span className="pane-tab-count">{analyses.length}</span>}
+        </button>
+      </div>
+
+      {tab === "analyse" ? (
+        <section className="pane-tab-panel" role="tabpanel" id="panel-analyse" aria-labelledby="tab-analyse">
+          <AnalysisPanel analyses={analyses} focusedId={focusedAnalysisId} onBackToChat={() => setTab("chat")} />
+        </section>
+      ) : (
+      <section className="pane-tab-panel" role="tabpanel" id="panel-chat" aria-labelledby="tab-chat">
       <div className="message-scroll">
         <div className="message-column">
           {messages.length === 0 ? (
@@ -86,6 +119,15 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
                       ))}
                     </div>
                   )}
+                  {message.analyses && (
+                    <div className="analysis-links">
+                      {message.analyses.map((analysis) => (
+                        <button type="button" key={analysis.id} className="analysis-link" onClick={() => openAnalysis(analysis.id)}>
+                          <Icon name="filter" size={14} /> Diagramm ansehen: {analysis.title} <Icon name="chevron" size={13} />
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {message.source && <div className="message-source"><Icon name="file" size={14} /><span>{message.source}</span><Icon name="chevron" size={13} /></div>}
                 </div>
                 {message.role === "assistant" && <div className="message-feedback"><button aria-label="Antwort kopieren" title="Antwort kopieren"><Icon name="file" size={14} /></button><button aria-label="Antwort hilfreich" title="Hilfreich"><Icon name="check" size={14} /></button></div>}
@@ -98,13 +140,15 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
       </div>
 
       <div className="composer-wrap">
-        <div className="quick-prompts"><span>Vorschläge</span><button type="button" onClick={() => onSend("Welche Punkte sollte ich im Gespräch ansprechen?")}>Gespräch vorbereiten</button><button type="button" onClick={() => onSend("Zeig mir offene Vorgänge")}>Offene Vorgänge</button></div>
+        <div className="quick-prompts"><span>Vorschläge</span><button type="button" onClick={() => onSend("Welche Punkte sollte ich im Gespräch ansprechen?")}>Gespräch vorbereiten</button><button type="button" onClick={() => onSend("Zeig mir offene Vorgänge")}>Offene Vorgänge</button><button type="button" onClick={() => onSend("Wer sind die Top 10 Vermittler nach Kreditvolumen?")}>Top-Vermittler</button></div>
         <form className="composer" onSubmit={submit}>
           <textarea rows={1} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={handleKeyDown} placeholder="Frage zur Partnerakte oder schreibe eine Notiz …" aria-label="Nachricht an den Partner-Copilot" />
           <div className="composer-footer"><span><Icon name="sparkle" size={14} /> Antworten mit Quellenbezug</span><div className="composer-actions"><button type="button" className="composer-attach" aria-label="Datei anhängen" title="Datei anhängen"><Icon name="file" size={17} /></button><button type="submit" className="send-button" disabled={!value.trim() || isSending} aria-label="Nachricht senden"><Icon name="send" size={16} /></button></div></div>
         </form>
         <p className="composer-note">Angaben aus dem Chat erst prüfen und anschließend bewusst in die Partnerakte übernehmen.</p>
       </div>
+      </section>
+      )}
     </main>
   );
 }

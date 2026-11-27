@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 import openpyxl
@@ -69,6 +70,76 @@ def test_mehrdeutiger_name_liefert_auswahl_buttons(client, monkeypatch):
     # Eindeutiger Treffer: keine Buttons, direkt die Partnerakte
     r = client.post(f"/api/chat/conversations/{chat_id}/messages", json={"inhalt": "Bernd Scholzmann"}, headers=BROWSER_A)
     assert r.json()["kandidaten"] == [] and r.json()["partner"]["name"].endswith("Scholzmann")
+
+
+class _FakeCall:
+    type = "function_call"
+
+    def __init__(self, name, arguments, call_id):
+        self.name, self.arguments, self.call_id = name, json.dumps(arguments), call_id
+
+
+class _FakeResponse:
+    def __init__(self, output=(), text=""):
+        self.output, self.output_text = list(output), text
+
+
+class _FakeOpenAI:
+    """Spielt Analyse-Agent und Chat-Agent nach – ohne Netz, deterministisch."""
+    SQL = ("SELECT TRIM(COALESCE(v.titel || ' ', '') || v.vorname || ' ' || v.name) AS vermittler, g.volumen_eur "
+           "FROM v_vermittler v JOIN geschaeftszahlen g ON g.vermittler_nr = v.vermittler_nr "
+           "WHERE g.jahr = 2025 AND g.sparte = 'gesamt' ORDER BY g.volumen_eur DESC LIMIT 10")
+
+    def __init__(self, **_):
+        self.responses = self
+
+    def create(self, model, instructions, tools, input):
+        from backend import openai_copilot
+        schon_tool = any(isinstance(i, dict) and i.get("type") == "function_call_output" for i in input)
+        if instructions == openai_copilot.ANALYSE_INSTRUCTIONS:
+            if schon_tool:
+                return _FakeResponse(text="KEINE")
+            return _FakeResponse([_FakeCall("sql_analyse", {"titel": "Top 10 Vermittler 2025", "sql": self.SQL,
+                                                              "diagramm": {"typ": "balken", "x": "vermittler", "y": "volumen_eur", "einheit": "eur"}}, "a1")])
+        if not schon_tool:
+            return _FakeResponse([_FakeCall("vorbereitete_analyse", {}, "c1")])
+        ergebnis = json.loads(next(i["output"] for i in input if isinstance(i, dict) and i.get("call_id") == "c1"))
+        top = ergebnis["zeilen"][0]
+        return _FakeResponse(text=f"Top-Vermittler 2025 ist {top[0]} mit {top[1]} EUR.")
+
+
+def test_analyse_agent_bereitet_sql_vor_und_chat_nutzt_es(client, monkeypatch):
+    import openai
+
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
+    chat_id = client.post("/api/chat/conversations", json={"titel": "t"}, headers=BROWSER_A).json()["id"]
+
+    r = client.post(f"/api/chat/conversations/{chat_id}/messages", json={"inhalt": "Wer ist der Top-Vermittler?"},
+                    headers=BROWSER_A)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    [analyse] = body["analysen"]
+    assert analyse["sql"] == _FakeOpenAI.SQL and analyse["vorbereitet"] is True
+    assert analyse["spalten"] == ["vermittler", "volumen_eur"]
+    # Testdaten 2025: Otto 14.902.000 > Baumann 10.773.001 > Huber 1.000.000 – Zahl kommt aus SQL, nicht geraten
+    assert analyse["zeilen"][0] == ["Martin Otto", 14902000]
+    assert body["message"]["content"] == "Top-Vermittler 2025 ist Martin Otto mit 14902000 EUR."
+
+    # SQL ist mit der Nachricht gespeichert (Zwischenspeicher fuer den Analyse-Tab)
+    verlauf = client.get("/api/chat/workspace", headers=BROWSER_A).json()["messages_by_conversation"][chat_id]
+    assert verlauf[-1]["metadata"]["analysen"][0]["sql"] == _FakeOpenAI.SQL
+
+
+def test_sql_analyse_ist_read_only(client):
+    from backend import openai_copilot
+
+    for boese in ("DELETE FROM vermittler", "PRAGMA table_info(vermittler)", "SELECT 1; DROP TABLE vermittler",
+                  "ATTACH 'x.db' AS x", "UPDATE vermittler SET name = 'x'"):
+        antwort, analyse = openai_copilot._sql_analyse({"titel": "x", "sql": boese,
+                                                        "diagramm": {"typ": "tabelle", "x": "", "y": "", "einheit": "keine"}})
+        assert analyse is None and "fehler" in antwort, boese
+    assert client.get("/api/vermittler/4251").status_code == 200  # Daten unangetastet
 
 
 def test_chats_sind_pro_browser_getrennt(client):

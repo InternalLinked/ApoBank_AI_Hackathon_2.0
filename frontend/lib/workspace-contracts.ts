@@ -26,6 +26,25 @@ export type ChatMessage = {
   aiConfigured?: boolean;
   /** Mehrere passende Vermittler: werden als Auswahl-Buttons unter der Antwort angezeigt. */
   candidates?: PartnerCandidate[];
+  /** SQL-Analysen dieser Antwort – Diagramm und SQL im Tab „Analyse“. */
+  analyses?: Analysis[];
+};
+
+export type ChartType = "balken" | "linie" | "tabelle";
+export type ChartUnit = "eur" | "anzahl" | "prozent" | "keine";
+
+export type Analysis = {
+  id: string;
+  title: string;
+  /** Genau das SQL, das die KI ausgeführt hat */
+  sql: string;
+  columns: string[];
+  rows: Array<Array<string | number | null>>;
+  rowCount: number;
+  truncated: boolean;
+  chart: { type: ChartType; x: string; y: string; unit: ChartUnit };
+  /** Zeitpunkt der zugehörigen Antwort, z. B. „18:42“ */
+  createdAt: string;
 };
 
 export type PartnerCandidate = {
