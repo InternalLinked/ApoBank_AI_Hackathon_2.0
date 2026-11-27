@@ -50,7 +50,7 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
       </header>
 
       <section className="conversation-heading">
-        <div className="heading-mark"><Icon name="sparkle" size={19} /></div>
+        <div className="heading-mark"><Icon name="sparkle" size={15} /></div>
         <div className="heading-copy"><span>CHAT · {partner ? `PARTNERAKTE ${partner.partnerId}` : "PARTNERVERTRIEB"}</span><h1>{conversation?.title ?? "Neue Unterhaltung"}</h1></div>
         <button className="heading-action" type="button"><Icon name="more" size={18} /></button>
       </section>
