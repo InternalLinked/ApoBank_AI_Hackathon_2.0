@@ -212,6 +212,13 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 .analysis-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .analysis-sql-button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid var(--sidebar); border-radius: 8px; color: #fff; background: var(--sidebar); font-size: 12.5px; font-weight: 600; cursor: pointer; }
 .analysis-sql-button:hover { background: var(--sidebar-soft); }
+/* Excel-Export: im Excel-Gruen, damit sofort als Tabellen-Download erkennbar */
+.excel-button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid #1d6f42; border-radius: 8px; color: #1d6f42; background: #fff; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.excel-button:hover:not(:disabled) { color: #fff; background: #1d6f42; }
+.excel-button:disabled { cursor: default; opacity: .65; }
+.excel-button:focus-visible { outline: 2px solid #8fb3ff; outline-offset: 2px; }
+.excel-button.is-compact { gap: 5px; padding: 4px 8px; border-radius: 7px; font-size: 11px; }
+.partner-profile-links { display: flex; align-items: center; gap: 10px; }
 .analysis-secondary-button { padding: 8px 12px; border: 1px solid #d9e4f5; border-radius: 8px; color: var(--sidebar); background: #fff; font-size: 12.5px; font-weight: 600; cursor: pointer; }
 .analysis-secondary-button:hover { border-color: var(--sidebar); }
 .analysis-sql { margin-top: 10px; overflow: hidden; border-radius: 9px; background: #0d1b33; }

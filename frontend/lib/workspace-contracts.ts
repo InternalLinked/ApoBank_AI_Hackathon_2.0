@@ -208,6 +208,9 @@ export type Transcription = {
 
 export interface WorkspaceApi {
   loadWorkspace(): Promise<WorkspaceSnapshot>;
+  /** Excel-Export (.xlsx, im Backend erzeugt); liefert den Dateinamen */
+  exportAnalysis(analysis: Analysis): Promise<string>;
+  exportPartner(vermittlerNr: number): Promise<string>;
   /** Änderungsvorschlag der KI ausführen (409 bei Konflikt) bzw. verwerfen */
   confirmProposal(proposalId: string): Promise<{ partner: PartnerSummary | null }>;
   rejectProposal(proposalId: string): Promise<void>;

@@ -24,9 +24,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import aenderungen, db, obsidian, openai_copilot, transcribe, vermittler_links
+from . import aenderungen, db, excel_export, obsidian, openai_copilot, transcribe, vermittler_links
 from .config import settings
-from .schemas import (ChatKonversationCreate, ChatNachrichtIn, EintragIn, GeschaeftszahlIn, ProfilFaktIn,
+from .schemas import (ChatKonversationCreate, ChatNachrichtIn, EintragIn, ExportTabelleIn, GeschaeftszahlIn, ProfilFaktIn,
                       SqlQueryIn, VermittlerCreate, VermittlerUpdate, ZusammenfassungIn)
 
 @asynccontextmanager
@@ -368,6 +368,30 @@ def get_vermittler(vermittler_nr: int, conn: Conn = Depends(db.get_conn)) -> dic
     v = _require(conn, vermittler_nr)
     _profil_sicherstellen(v)
     return {**v, "interessen_profil": obsidian.profil_interessen(vermittler_nr)}
+
+
+XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@app.get("/api/vermittler/{vermittler_nr}/export.xlsx", tags=["Export"],
+         summary="Partnerakte als Excel (Stammdaten, Geschaeftszahlen, Profil, Notizen)")
+def export_vermittler(vermittler_nr: int, conn: Conn = Depends(db.get_conn)) -> Response:
+    v = _require(conn, vermittler_nr)
+    _profil_sicherstellen(v)
+    v = {**v, "interessen_profil": obsidian.profil_interessen(vermittler_nr)}
+    inhalt = excel_export.vermittler(v, obsidian.read_profil(vermittler_nr), obsidian.list_entries(vermittler_nr))
+    name = excel_export.dateiname(f"Partnerakte_VM-{vermittler_nr}_{v['anzeigename']}")
+    return Response(inhalt, media_type=XLSX_MEDIA_TYPE, headers={"Content-Disposition": excel_export.content_disposition(name)})
+
+
+@app.post("/api/export/tabelle", tags=["Export"], summary="Tabelle (z. B. Analyse-Ergebnis) als Excel herunterladen")
+def export_tabelle(body: ExportTabelleIn) -> Response:
+    """Schreibt nichts, speichert nichts – wandelt nur die mitgeschickte Tabelle in eine .xlsx-Datei um."""
+    if any(len(zeile) > len(body.spalten) for zeile in body.zeilen):
+        raise HTTPException(422, "Eine Zeile hat mehr Werte als Spalten.")
+    inhalt = excel_export.tabelle(body.titel, body.spalten, body.zeilen, body.sql)
+    return Response(inhalt, media_type=XLSX_MEDIA_TYPE,
+                    headers={"Content-Disposition": excel_export.content_disposition(excel_export.dateiname(body.titel))})
 
 
 def _profil_sicherstellen(v: dict[str, Any]) -> None:

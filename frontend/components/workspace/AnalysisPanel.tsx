@@ -7,6 +7,8 @@ type AnalysisPanelProps = {
   analyses: Analysis[];
   focusedId: string | null;
   onBackToChat: () => void;
+  /** Lädt das Ergebnis als .xlsx herunter; Fehler meldet der Aufrufer */
+  onExport: (analysis: Analysis) => Promise<void>;
 };
 
 function DataTable({ analysis }: { analysis: Analysis }) {
@@ -35,8 +37,18 @@ function DataTable({ analysis }: { analysis: Analysis }) {
 /** SQL-Ansicht vorerst ausgeblendet – auf true setzen, um "SQL-Code anzeigen" wieder einzublenden. */
 const SQL_ANZEIGEN = false;
 
-function AnalysisCard({ analysis, focused }: { analysis: Analysis; focused: boolean }) {
+function AnalysisCard({ analysis, focused, onExport }: { analysis: Analysis; focused: boolean; onExport: (a: Analysis) => Promise<void> }) {
   const hasChart = chartPoints(analysis) !== null;
+  const [exporting, setExporting] = useState(false);
+
+  async function exportExcel() {
+    setExporting(true);
+    try {
+      await onExport(analysis);
+    } finally {
+      setExporting(false);
+    }
+  }
   const [showSql, setShowSql] = useState(false);
   const [showTable, setShowTable] = useState(!hasChart);
   const [copied, setCopied] = useState(false);
@@ -79,6 +91,11 @@ function AnalysisCard({ analysis, focused }: { analysis: Analysis; focused: bool
             {showTable ? "Tabelle ausblenden" : "Tabelle anzeigen"}
           </button>
         )}
+        <button type="button" className="excel-button" onClick={() => void exportExcel()} disabled={exporting || analysis.rows.length === 0}
+          title="Ergebnis als Excel-Datei (.xlsx) herunterladen">
+          {exporting ? <span className="voice-spinner" aria-hidden="true" /> : <Icon name="file" size={14} />}
+          {exporting ? "Wird erstellt …" : "Excel exportieren"}
+        </button>
       </div>
 
       {SQL_ANZEIGEN && showSql && (
@@ -96,7 +113,7 @@ function AnalysisCard({ analysis, focused }: { analysis: Analysis; focused: bool
   );
 }
 
-export function AnalysisPanel({ analyses, focusedId, onBackToChat }: AnalysisPanelProps) {
+export function AnalysisPanel({ analyses, focusedId, onBackToChat, onExport }: AnalysisPanelProps) {
   if (analyses.length === 0) {
     return (
       <div className="analysis-empty">
@@ -110,7 +127,7 @@ export function AnalysisPanel({ analyses, focusedId, onBackToChat }: AnalysisPan
   return (
     <div className="analysis-scroll">
       <div className="analysis-column">
-        {analyses.map((analysis) => <AnalysisCard key={analysis.id} analysis={analysis} focused={analysis.id === focusedId} />)}
+        {analyses.map((analysis) => <AnalysisCard key={analysis.id} analysis={analysis} focused={analysis.id === focusedId} onExport={onExport} />)}
       </div>
     </div>
   );

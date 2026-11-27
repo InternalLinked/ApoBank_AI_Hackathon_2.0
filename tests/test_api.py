@@ -614,6 +614,39 @@ def test_neue_infos_werden_erst_nach_bestaetigung_gespeichert(client, monkeypatc
     assert any("- [ ] Konditionen schicken" in e["inhalt"] for e in notizen)
 
 
+def _xlsx(r):
+    import io
+
+    import openpyxl
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument.spreadsheetml")
+    assert r.headers["content-disposition"].startswith("attachment;")
+    return openpyxl.load_workbook(io.BytesIO(r.content))
+
+
+def test_excel_export_analyse(client):
+    r = client.post("/api/export/tabelle", json={
+        "titel": "Top 3 Vermittler 2025", "spalten": ["vermittler", "volumen_eur"],
+        "zeilen": [["Martin Otto", 14902000], ["=HYPERLINK(\"http://boese\")", 1]], "sql": "SELECT 1"})
+    wb = _xlsx(r)
+    ws = wb["Analyse"]
+    assert [c.value for c in ws[1]] == ["vermittler", "volumen_eur"]
+    assert ws["A2"].value == "Martin Otto" and ws["B2"].value == 14902000 and "€" in ws["B2"].number_format
+    assert ws["A3"].data_type == "s"  # Formel-Einschleusung: bleibt Text
+    assert wb["Info"]["B5"].value == "SELECT 1"
+    assert client.post("/api/export/tabelle", json={"titel": "x", "spalten": ["a"], "zeilen": [[1, 2]]}).status_code == 422
+
+
+def test_excel_export_partnerakte(client):
+    wb = _xlsx(client.get("/api/vermittler/4251/export.xlsx"))
+    assert wb.sheetnames == ["Partnerprofil", "Geschäftszahlen", "Persönliches Profil", "Notizen"]
+    felder = {row[0].value: row[1].value for row in wb["Partnerprofil"].iter_rows(min_row=2)}
+    assert felder["Vermittlernummer"] == 4251 and felder["E-Mail"] == "abc.aaa@abc.de" and "Sport" in felder["Interessen"]
+    jahre = [row[0].value for row in wb["Geschäftszahlen"].iter_rows(min_row=2)]
+    assert jahre == [2023, 2024, 2025, 2026]
+    assert client.get("/api/vermittler/999999/export.xlsx").status_code == 404
+
+
 def test_copilot_speichert_nichts_bei_unbekanntem_vermittler(client):
     from backend import db, openai_copilot
     conn = db.connect()

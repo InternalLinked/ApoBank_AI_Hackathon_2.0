@@ -105,6 +105,35 @@ function clientId(): string {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const { response, endpoint, requestId } = await send(path, init);
+  if (response.status === 204) return undefined as T;
+  try {
+    return await response.json() as T;
+  } catch (cause) {
+    console.error(`[API] ${endpoint} – Antwort ist kein gültiges JSON`, cause);
+    throw new ApiError("Der Server hat eine unlesbare Antwort geschickt.", response.status, "UNGUELTIGE_ANTWORT", endpoint, requestId);
+  }
+}
+
+/** Datei vom Backend laden und im Browser speichern (Name aus Content-Disposition, sonst `fallbackName`). */
+async function download(path: string, init: RequestInit | undefined, fallbackName: string): Promise<string> {
+  const { response } = await send(path, init);
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  const plain = /filename="?([^";]+)"?/i.exec(disposition)?.[1];
+  const filename = encoded ? decodeURIComponent(encoded) : plain ?? fallbackName;
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  return filename;
+}
+
+async function send(path: string, init?: RequestInit): Promise<{ response: Response; endpoint: string; requestId: string | null }> {
   const isLocalFrontend = typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname) && window.location.port === "3000";
   const apiBase = isLocalFrontend ? "http://127.0.0.1:8000/api" : "/api";
   const method = (init?.method ?? "GET").toUpperCase();
@@ -144,13 +173,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     console.error(`[API] ${endpoint} -> ${response.status} [${error.code}]${error.requestId ? ` ref=${error.requestId}` : ""}: ${message}`, data.detail ?? raw.slice(0, 500));
     throw error;
   }
-  if (response.status === 204) return undefined as T;
-  try {
-    return await response.json() as T;
-  } catch (cause) {
-    console.error(`[API] ${endpoint} – Antwort ist kein gültiges JSON`, cause);
-    throw new ApiError("Der Server hat eine unlesbare Antwort geschickt.", response.status, "UNGUELTIGE_ANTWORT", endpoint, requestId);
-  }
+  return { response, endpoint, requestId };
 }
 
 /** Fehlertext für Toasts: Meldung plus Referenz (Status, Code, Request-ID). */
@@ -463,6 +486,17 @@ export function createWorkspaceApi(): WorkspaceApi {
         method: "POST",
         body: JSON.stringify({ titel: "Neue Unterhaltung" }),
       }));
+    },
+
+    async exportAnalysis(analysis: Analysis): Promise<string> {
+      return download("/export/tabelle", {
+        method: "POST",
+        body: JSON.stringify({ titel: analysis.title, spalten: analysis.columns, zeilen: analysis.rows, sql: analysis.sql }),
+      }, `${analysis.title}.xlsx`);
+    },
+
+    async exportPartner(vermittlerNr: number): Promise<string> {
+      return download(`/vermittler/${vermittlerNr}/export.xlsx`, undefined, `Vermittler-${vermittlerNr}.xlsx`);
     },
 
     async confirmProposal(proposalId: string): Promise<{ partner: PartnerSummary | null }> {

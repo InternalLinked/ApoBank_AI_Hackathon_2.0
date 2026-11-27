@@ -1,5 +1,5 @@
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeProposal, ChatMessage, Conversation, PartnerCandidate, PartnerSummary, ProposalStatus, StartSuggestion } from "@/lib/workspace-contracts";
+import type { Analysis, ChangeProposal, ChatMessage, Conversation, PartnerCandidate, PartnerSummary, ProposalStatus, StartSuggestion } from "@/lib/workspace-contracts";
 import { AnalysisPanel } from "./AnalysisPanel";
 import { ChangesPanel } from "./ChangesPanel";
 import { Icon } from "./Icons";
@@ -44,9 +44,11 @@ type ConversationPaneProps = {
   /** true = erfolgreich (Status wird lokal aktualisiert); Fehler zeigt der Aufrufer selbst an */
   onConfirmProposal: (proposal: ChangeProposal) => Promise<boolean>;
   onRejectProposal: (proposal: ChangeProposal) => Promise<boolean>;
+  /** Analyse-Ergebnis als Excel herunterladen */
+  onExportAnalysis: (analysis: Analysis) => Promise<void>;
 };
 
-export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, sidebarCollapsed, onToggleSidebar, onOpenDetails, inspectorCollapsed, onExpandInspector, onToggleInspector, onSelectCandidate, onOpenPartner, onTranscribe, onError, onConfirmProposal, onRejectProposal }: ConversationPaneProps) {
+export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, sidebarCollapsed, onToggleSidebar, onOpenDetails, inspectorCollapsed, onExpandInspector, onToggleInspector, onSelectCandidate, onOpenPartner, onTranscribe, onError, onConfirmProposal, onRejectProposal, onExportAnalysis }: ConversationPaneProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -161,7 +163,7 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
         </section>
       ) : activeTab === "analyse" ? (
         <section className="pane-tab-panel" role="tabpanel" id="panel-analyse" aria-labelledby="tab-analyse">
-          <AnalysisPanel analyses={analyses} focusedId={focusedAnalysisId} onBackToChat={() => setTab("chat")} />
+          <AnalysisPanel analyses={analyses} focusedId={focusedAnalysisId} onBackToChat={() => setTab("chat")} onExport={onExportAnalysis} />
         </section>
       ) : (
       <section className="pane-tab-panel" role="tabpanel" id="panel-chat" aria-labelledby="tab-chat">

@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react";
 import type { ExtractedFinding, ManualEntryInput, PartnerDetail, PartnerSummary, WorkspaceApi } from "@/lib/workspace-contracts";
+import { errorMessage } from "@/lib/workspace-api";
 import { Icon } from "./Icons";
 import { ObsidianGraph } from "./ObsidianGraph";
 
@@ -21,6 +22,20 @@ type InspectorPanelProps = {
 export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, onCloseMobile, onSaveEntry, onConfirmFindings, api, profileRefreshKey, onError, onClosePartner }: InspectorPanelProps) {
   const today = new Date().toISOString().slice(0, 10);
   const [addOpen, setAddOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  /** Partnerakte (Stammdaten, Zahlen, Profil, Notizen) als .xlsx herunterladen */
+  async function exportPartner(vermittlerNr: number) {
+    setExporting(true);
+    try {
+      const filename = await api.exportPartner(vermittlerNr);
+      onError(`Excel-Datei „${filename}“ wurde heruntergeladen.`);
+    } catch (error) {
+      onError(errorMessage(error, "Der Excel-Export ist fehlgeschlagen."));
+    } finally {
+      setExporting(false);
+    }
+  }
   const [entryKind, setEntryKind] = useState<"partner" | "note">("partner");
   const [fileName, setFileName] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -113,7 +128,7 @@ export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, o
       {partner && <div className="partner-status-row"><span className="status-dot" />{partner.status}<span className="status-separator">·</span><span>Betreut von {partner.relationshipManager}</span></div>}
 
       {partnerDetail && <section className="partner-profile partner-profile-main" aria-label="Daten aus der Partnerdatenbank">
-        <div className="partner-profile-heading"><h3>Partnerprofil</h3>{partnerDetail.obsidianUri ? <a className="obsidian-link" href={partnerDetail.obsidianUri} title="Vermittler-Notiz in Obsidian öffnen">Obsidian-Akte</a> : <span>Live aus Datenbank</span>}</div>
+        <div className="partner-profile-heading"><h3>Partnerprofil</h3><div className="partner-profile-links"><button type="button" className="excel-button is-compact" onClick={() => void exportPartner(partnerDetail.vermittlerNr)} disabled={exporting} title="Partnerakte als Excel-Datei (.xlsx) herunterladen">{exporting ? <span className="voice-spinner" aria-hidden="true" /> : <Icon name="file" size={13} />}{exporting ? "Wird erstellt …" : "Excel exportieren"}</button>{partnerDetail.obsidianUri ? <a className="obsidian-link" href={partnerDetail.obsidianUri} title="Vermittler-Notiz in Obsidian öffnen">Obsidian-Akte</a> : <span>Live aus Datenbank</span>}</div></div>
         <dl>
           <div><dt>Vermittler-ID</dt><dd>{partnerDetail.partnerId}</dd></div>
           <div><dt>Unternehmen</dt><dd>{partnerDetail.company}</dd></div>

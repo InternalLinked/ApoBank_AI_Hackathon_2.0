@@ -93,6 +93,14 @@ class ProfilFaktIn(BaseModel):
     datum: date | None = Field(None, description="Wann die Info notiert/bekannt wurde, Standard: heute")
 
 
+class ExportTabelleIn(BaseModel):
+    """Analyse-Ergebnis fuer den Excel-Export (kommt aus dem Tab "Analyse")."""
+    titel: str = Field("Analyse", min_length=1, max_length=120)
+    spalten: list[str] = Field(max_length=200)
+    zeilen: list[list[Any]] = Field(max_length=5000)
+    sql: str | None = Field(None, max_length=20_000, description="Verwendetes SQL, landet im Blatt 'Info'")
+
+
 class SqlQueryIn(BaseModel):
     sql: str = Field(description="Ein einzelnes SELECT/WITH-Statement", examples=[
         "SELECT marktgebiet, COUNT(*) AS n FROM v_vermittler GROUP BY marktgebiet"])

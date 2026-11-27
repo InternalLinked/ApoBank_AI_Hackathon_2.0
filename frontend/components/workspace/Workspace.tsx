@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createWorkspaceApi, errorMessage } from "@/lib/workspace-api";
-import type { ChangeProposal, ChatMessage, ExtractedFinding, ManualEntryInput, PartnerCandidate, PartnerDetail, PartnerSummary, StartSuggestion, WorkspaceApi, WorkspaceSnapshot } from "@/lib/workspace-contracts";
+import type { Analysis, ChangeProposal, ChatMessage, ExtractedFinding, ManualEntryInput, PartnerCandidate, PartnerDetail, PartnerSummary, StartSuggestion, WorkspaceApi, WorkspaceSnapshot } from "@/lib/workspace-contracts";
 import { ChatSidebar } from "./ChatSidebar";
 import { ConversationPane } from "./ConversationPane";
 import { InspectorPanel } from "./InspectorPanel";
@@ -71,6 +71,16 @@ export function Workspace() {
     } catch (error) {
       setToast(errorMessage(error, "Die Änderungen konnten nicht gespeichert werden."));
       return false;
+    }
+  }
+
+  /** Excel-Export aus dem Analyse-Tab; Fehler mit Code/Ref als Hinweis */
+  async function exportAnalysis(analysis: Analysis): Promise<void> {
+    try {
+      const filename = await api.exportAnalysis(analysis);
+      setToast(`Excel-Datei „${filename}“ wurde heruntergeladen.`);
+    } catch (error) {
+      setToast(errorMessage(error, "Der Excel-Export ist fehlgeschlagen."));
     }
   }
 
@@ -287,7 +297,7 @@ export function Workspace() {
     <div className={`workspace-shell ${inspectorCollapsed ? "inspector-collapsed" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       {mobileDrawer && <button className="mobile-backdrop" aria-label="Seitenleiste schließen" onClick={() => setMobileDrawer(null)} />}
       <ChatSidebar accountName={snapshot.accountName} conversations={snapshot.conversations} activeConversationId={activeConversationId} mobileOpen={mobileDrawer === "chats"} onCloseMobile={() => setMobileDrawer(null)} onSelect={selectConversation} onNewConversation={createConversation} onDelete={deleteConversation} />
-      <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)} onOpenDetails={openInspector} inspectorCollapsed={inspectorCollapsed} onExpandInspector={openInspector} onToggleInspector={() => (inspectorOpen ? hideInspector() : openInspector())} onSelectCandidate={selectCandidate} onOpenPartner={openPartnerFromLink} onTranscribe={transcribeAudio} onError={setToast} onConfirmProposal={confirmProposal} onRejectProposal={rejectProposal} />
+      <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)} onOpenDetails={openInspector} inspectorCollapsed={inspectorCollapsed} onExpandInspector={openInspector} onToggleInspector={() => (inspectorOpen ? hideInspector() : openInspector())} onSelectCandidate={selectCandidate} onOpenPartner={openPartnerFromLink} onTranscribe={transcribeAudio} onError={setToast} onConfirmProposal={confirmProposal} onRejectProposal={rejectProposal} onExportAnalysis={exportAnalysis} />
       <InspectorPanel partner={snapshot.partner} partnerDetail={partnerDetail} findings={findings} mobileOpen={mobileDrawer === "details"} onCloseMobile={hideInspector} onSaveEntry={saveEntry} onConfirmFindings={confirmFindings} api={api} profileRefreshKey={profileRefreshKey} onError={setToast} onClosePartner={closePartner} />
       {toast && <div className="toast" role="status"><Icon name="check" size={16} />{toast}<button onClick={() => setToast("")} aria-label="Hinweis schließen"><Icon name="close" size={15} /></button></div>}
     </div>
