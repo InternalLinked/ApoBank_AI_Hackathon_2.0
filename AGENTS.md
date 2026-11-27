@@ -206,6 +206,9 @@ Das Profil steckt auch in `kontext_text` und im Copilot-Werkzeug `hole_partnerak
 Der OpenAI-Chat (`backend/openai_copilot.py`) speichert über sein Werkzeug `im_obsidian_speichern` **sofort und
 ohne Rückfrage** ins Obsidian-Netz: `gruppe = "persoenlich"` → Profil, sonst → Notiz-Eintrag (`next-step` → Maßnahme).
 Er schreibt nur in Obsidian (+ Protokollzeile in `obsidian_eintrag`), **nie** in Stammdaten oder Geschäftszahlen.
+Antworten des Copilots sind **Markdown** (Frontend: `MessageMarkdown.tsx`, react-markdown + GFM-Tabellen). Links nur als
+`[Text](url)` und nur mit URLs aus Tool-Feldern (`links`, `uri`, `akte_link`); erlaubte Protokolle: http(s), mailto, tel, obsidian.
+Formatregeln stehen in `SYSTEM_INSTRUCTIONS` (`backend/openai_copilot.py`).
 
 Body für `POST …/eintraege`:
 ```json

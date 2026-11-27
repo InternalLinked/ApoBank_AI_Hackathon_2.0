@@ -142,6 +142,47 @@ def test_sql_analyse_ist_read_only(client):
     assert client.get("/api/vermittler/4251").status_code == 200  # Daten unangetastet
 
 
+def test_transkription_prueft_audio_und_liefert_text(client, monkeypatch):
+    from backend import transcribe
+
+    aufrufe = []
+
+    async def fake_stream(pcm, sample_rate, sprache):  # ersetzt nur den AWS-Aufruf, Pruefung laeuft echt
+        dauer = transcribe.pruefe_audio(pcm, sample_rate, sprache)
+        aufrufe.append((len(pcm), sample_rate, sprache))
+        return {"text": "Termin mit Herrn Weber am Montag", "dauer_s": round(dauer, 1), "verarbeitung_ms": 5}
+
+    monkeypatch.setattr(transcribe, "transkribieren", fake_stream)
+    eine_sekunde = b"\x00\x00" * 16000
+
+    r = client.post("/api/transkription", files={"audio": ("a.pcm", eine_sekunde)}, data={"sample_rate": "16000"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"text": "Termin mit Herrn Weber am Montag", "dauer_s": 1.0, "verarbeitung_ms": 5}
+    assert aufrufe == [(32000, 16000, "de-DE")]
+
+    faelle = [
+        (b"\x00\x00" * 100, {}, 422, "TRANSCRIBE_ZU_KURZ"),
+        (b"\x00" * 32001, {}, 422, "TRANSCRIBE_FORMAT"),                 # ungerade Byte-Zahl = kein 16-bit-PCM
+        (eine_sekunde, {"sprache": "xx-XX"}, 422, "TRANSCRIBE_SPRACHE"),
+        (eine_sekunde, {"sample_rate": "1000"}, 422, "TRANSCRIBE_FORMAT"),
+        (b"\x00\x00" * 16000 * 122, {}, 413, "TRANSCRIBE_ZU_LANG"),
+    ]
+    for audio, daten, status, code in faelle:
+        r = client.post("/api/transkription", files={"audio": ("a.pcm", audio)}, data=daten)
+        assert (r.status_code, r.json()["fehler_code"]) == (status, code), (code, r.text)
+
+
+def test_transkription_fehlende_rechte_werden_verstaendlich(client, monkeypatch):
+    from backend import transcribe
+
+    class AccessDeniedException(Exception):
+        pass
+
+    assert transcribe._uebersetze(AccessDeniedException("User is not authorized")).code == "TRANSCRIBE_RECHTE"
+    assert transcribe._uebersetze(RuntimeError("AWS_ERROR_AUTH_SIGNING_NO_CREDENTIALS")).code == "TRANSCRIBE_RECHTE"
+    assert transcribe._uebersetze(ValueError("kaputt")).code == "TRANSCRIBE_FEHLER"
+
+
 def test_chats_sind_pro_browser_getrennt(client):
     chat_a = client.post("/api/chat/conversations", json={"titel": "Von A"}, headers=BROWSER_A).json()["id"]
     chat_b = client.post("/api/chat/conversations", json={"titel": "Von B"}, headers=BROWSER_B).json()["id"]
@@ -445,3 +486,19 @@ def test_copilot_speichert_nichts_bei_unbekanntem_vermittler(client):
     finally:
         conn.close()
     assert "fehler" in output and nr is None and findings == []
+
+
+def test_copilot_werkzeuge_liefern_links(client):
+    from backend import db, openai_copilot
+    conn = db.connect()
+    try:
+        akte, nr, _, _ = openai_copilot._execute_tool(conn, "hole_partnerakte", {"vermittler_nr": 4251})
+        gespeichert, *_ = openai_copilot._execute_tool(conn, "im_obsidian_speichern", {"vermittler_nr": 4251, "angaben": [
+            {"gruppe": "persoenlich", "label": "Haustiere", "wert": "Hat einen Hund namens Tim", "quelle": "Chat"}]})
+    finally:
+        conn.close()
+    assert nr == 4251
+    assert akte["links"]["obsidian_akte"].startswith("obsidian://open?vault=")
+    assert "Profil" in akte["links"]["persoenliches_profil"]
+    assert all(e["uri"].startswith("obsidian://") for e in gespeichert["gespeichert"])
+    assert gespeichert["akte_link"].startswith("obsidian://")

@@ -24,7 +24,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import db, obsidian, openai_copilot
+from . import db, obsidian, openai_copilot, transcribe
 from .config import settings
 from .schemas import (ChatKonversationCreate, ChatNachrichtIn, EintragIn, GeschaeftszahlIn, ProfilFaktIn,
                       SqlQueryIn, VermittlerCreate, VermittlerUpdate, ZusammenfassungIn)
@@ -664,6 +664,25 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, client: str =
     return {"message": _chat_message(message), "partner": partner, "findings": reply.findings,
             "openai_configured": reply.configured, "fehler": reply.fehler, "kandidaten": reply.kandidaten,
             "analysen": reply.analysen}
+
+
+# =========================================================================== Sprache (Amazon Transcribe)
+
+@app.exception_handler(transcribe.TranskriptionsFehler)
+def _transkriptions_fehler(request: Request, exc: transcribe.TranskriptionsFehler) -> JSONResponse:
+    return _fehler_json(request, exc.status, exc.meldung, exc.code)
+
+
+@app.post("/api/transkription", tags=["Sprache"],
+          summary="Sprachaufnahme (16-bit-PCM, mono) mit Amazon Transcribe in Text umwandeln")
+async def transkription(audio: UploadFile = File(..., description="Rohes PCM s16le mono, max. 120 s"),
+                        sample_rate: int = Form(16000), sprache: str = Form("de-DE")) -> dict[str, Any]:
+    """Der Text wird nur zurueckgegeben, nicht gespeichert – die Oberflaeche setzt ihn ins Eingabefeld."""
+    max_bytes = (transcribe.MAX_SEKUNDEN + 1) * 48000 * 2
+    pcm = await audio.read(max_bytes + 1)
+    if len(pcm) > max_bytes:
+        raise transcribe.TranskriptionsFehler("TRANSCRIBE_ZU_LANG", 413, "Die Aufnahme ist zu lang.")
+    return await transcribe.transkribieren(pcm, sample_rate, sprache)
 
 
 # =========================================================================== Obsidian-Gehirn

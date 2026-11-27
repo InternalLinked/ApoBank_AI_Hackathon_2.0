@@ -221,6 +221,19 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 .composer-actions { display: flex; align-items: center; gap: 7px; }
 .composer-attach { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 8px; color: #879692; background: transparent; }
 .composer-attach:hover { color: #2a806a; background: #f0f7f3; }
+/* Mikrofon (Amazon Transcribe): Ruhezustand wie die anderen Icons, Aufnahme rot mit Timer */
+.voice-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 30px; height: 30px; padding: 0 7px; border: 0; border-radius: 8px; color: #879692; background: transparent; font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; }
+.voice-button:hover:not(:disabled) { color: var(--sidebar); background: #eef3fb; }
+.voice-button:disabled { cursor: default; opacity: .7; }
+.voice-button:focus-visible { outline: 2px solid #8fb3ff; outline-offset: 1px; }
+.voice-button.is-recording { padding: 0 10px; color: #fff; background: #c2352b; }
+.voice-button.is-recording:hover { background: #a52b23; }
+.voice-button.is-busy { color: var(--sidebar); background: #eef3fb; opacity: 1; }
+.voice-dot { width: 7px; height: 7px; border-radius: 50%; background: #fff; animation: voice-pulse 1.2s ease-in-out infinite; }
+.voice-spinner { width: 12px; height: 12px; border: 2px solid #c9d7ee; border-top-color: var(--sidebar); border-radius: 50%; animation: voice-spin .8s linear infinite; }
+@keyframes voice-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@keyframes voice-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .voice-dot, .voice-spinner { animation: none; } }
 .send-button { display: grid; place-items: center; width: 31px; height: 31px; border: 0; border-radius: 9px; color: #fff; background: var(--green); transition: background .18s ease, transform .18s ease, box-shadow .18s ease; }
 .send-button:hover:not(:disabled) { background: var(--green-dark); transform: translateY(-1px); box-shadow: 0 6px 13px rgba(23,66,127,.25); }
 .send-button:disabled { cursor: not-allowed; opacity: .42; }
@@ -492,3 +505,31 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 .suggestion-grid button > span { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .suggestion-grid strong { color: #17427f; font-size: 13px; font-weight: 650; }
 .suggestion-grid small { color: #7d8ea6; font-size: 11px; }
+
+/* Copilot-Antworten als Markdown */
+.message-markdown { color: #425459; font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
+.message-markdown > :first-child { margin-top: 0; }
+.message-markdown > :last-child { margin-bottom: 0; }
+.message-markdown p { margin: 0 0 8px; }
+.message-markdown h1, .message-markdown h2, .message-markdown h3, .message-markdown h4 { margin: 14px 0 6px; color: #17365f; font-size: 13.5px; font-weight: 700; letter-spacing: -.01em; }
+.message-markdown h1, .message-markdown h2 { font-size: 14.5px; }
+.message-markdown strong { color: #17365f; font-weight: 650; }
+.message-markdown em { color: #5d6f86; }
+.message-markdown ul, .message-markdown ol { margin: 0 0 8px; padding-left: 18px; }
+.message-markdown li { margin: 2px 0; }
+.message-markdown li::marker { color: #6f8db8; }
+.message-markdown li > p { margin: 0; }
+.message-markdown blockquote { margin: 8px 0; padding: 7px 10px; border-left: 3px solid #e2be72; border-radius: 0 8px 8px 0; color: #6b5a33; background: #fffaf0; }
+.message-markdown blockquote p { margin: 0; }
+.message-markdown code { padding: 1px 4px; border-radius: 4px; background: #f1f5fb; color: #23446f; font-size: 14px; }
+.message-markdown hr { margin: 10px 0; border: 0; border-top: 1px solid #e8eef6; }
+.message-markdown .md-link { color: #1f5bb0; font-weight: 600; text-decoration: underline; text-decoration-color: rgba(31,91,176,.35); text-underline-offset: 2px; }
+.message-markdown .md-link:hover { text-decoration-color: currentColor; }
+.message-markdown .md-link-obsidian::before { content: "◆ "; color: #8f6ad1; font-size: 11px; }
+.md-table-wrap { overflow-x: auto; margin: 6px 0 10px; border: 1px solid #e3e9f2; border-radius: 8px; }
+.message-markdown table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.message-markdown th { padding: 6px 8px; background: #f5f8fd; color: #23446f; font-weight: 650; text-align: left; white-space: nowrap; }
+.message-markdown td { padding: 5px 8px; border-top: 1px solid #eef2f8; }
+.message-markdown td:not(:first-child), .message-markdown th:not(:first-child) { white-space: nowrap; }
+.message-markdown ul { list-style: disc; }
+.message-markdown ol { list-style: decimal; }

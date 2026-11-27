@@ -23,7 +23,9 @@ type IconName =
   | "briefcase"
   | "filter"
   | "trash"
-  | "copy";
+  | "copy"
+  | "mic"
+  | "stop";
 
 const paths: Record<IconName, ReactNode> = {
   sparkle: <><path d="m12 3 1.35 5.65L19 10l-5.65 1.35L12 17l-1.35-5.65L5 10l5.65-1.35L12 3Z" /><path d="m19 15 .65 2.35L22 18l-2.35.65L19 21l-.65-2.35L16 18l2.35-.65L19 15Z" /></>,
@@ -49,6 +51,8 @@ const paths: Record<IconName, ReactNode> = {
   filter: <><path d="M4 6h16M7 12h10M10 18h4" /></>,
   trash: <><path d="M4 7h16M10 11v6M14 11v6" /><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M9 7V4h6v3" /></>,
   copy: <><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" /></>,
+  mic: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" /></>,
+  stop: <rect x="6" y="6" width="12" height="12" rx="2" />,
 };
 
 export function Icon({ name, size = 18, className = "" }: { name: IconName; size?: number; className?: string }) {

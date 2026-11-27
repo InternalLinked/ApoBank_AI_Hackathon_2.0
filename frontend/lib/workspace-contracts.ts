@@ -169,8 +169,18 @@ export type ChatReply = {
   error?: string;
 };
 
+export type Transcription = {
+  text: string;
+  /** Länge der Aufnahme in Sekunden */
+  seconds: number;
+  /** Bearbeitungszeit bei Amazon Transcribe */
+  processingMs: number;
+};
+
 export interface WorkspaceApi {
   loadWorkspace(): Promise<WorkspaceSnapshot>;
+  /** Sprachaufnahme (16-bit-PCM, mono) per Amazon Transcribe in Text umwandeln */
+  transcribe(pcm: Blob, sampleRate: number, language?: string): Promise<Transcription>;
   createConversation(): Promise<Conversation>;
   deleteConversation(conversationId: string): Promise<void>;
   sendMessage(conversationId: string, content: string): Promise<ChatReply>;
