@@ -144,8 +144,19 @@ def _openai_fehler(exc: Exception) -> CopilotReply:
         return _fehler_reply("OPENAI_MODELL", f"Das Modell `{settings.openai_model}` ist nicht verfuegbar. "
                              "Bitte `OPENAI_MODEL` pruefen.", status)
     if isinstance(exc, openai.RateLimitError):
-        return _fehler_reply("OPENAI_LIMIT", "OpenAI-Limit erreicht (zu viele Anfragen oder kein Guthaben). "
-                             "Bitte kurz warten oder das Kontingent pruefen.", status)
+        # 429 hat zwei sehr verschiedene Ursachen; OpenAI unterscheidet sie ueber error.code.
+        body = getattr(exc, "body", None)
+        detail = body.get("error", body) if isinstance(body, dict) else {}
+        oa_code = getattr(exc, "code", None) or (detail.get("code") if isinstance(detail, dict) else None)
+        oa_text = (detail.get("message") if isinstance(detail, dict) else None) or getattr(exc, "message", "")
+        if oa_code in {"insufficient_quota", "credit_balance_exhausted"}:
+            return _fehler_reply("OPENAI_KEIN_GUTHABEN",
+                                 "OpenAI meldet kein nutzbares API-Guthaben fuer diesen Schluessel "
+                                 "(insufficient_quota). Guthaben muss in der Organisation/dem Projekt des "
+                                 "Schluessels unter platform.openai.com > Billing liegen; ChatGPT-Abos zaehlen nicht. "
+                                 "Auch Budget-Limits des Projekts pruefen.", status)
+        return _fehler_reply("OPENAI_LIMIT", f"OpenAI-Ratenlimit erreicht ({oa_code or 'unbekannt'}): {oa_text} "
+                             "Bitte kurz warten.", status)
     if isinstance(exc, openai.BadRequestError):
         return _fehler_reply("OPENAI_ANFRAGE", f"OpenAI hat die Anfrage abgelehnt: {getattr(exc, 'message', exc)}",
                              status)
