@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import copilot, db, obsidian
+from . import db, obsidian, openai_copilot
 from .config import settings
 from .schemas import (ChatKonversationCreate, ChatNachrichtIn, EintragIn, GeschaeftszahlIn, SqlQueryIn,
                       VermittlerCreate, VermittlerUpdate, ZusammenfassungIn)
@@ -538,7 +538,7 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, conn: Conn = 
         (conversation_id,),
     ).fetchall()
     history = [{"role": row["rolle"], "content": row["inhalt"]} for row in reversed(history_rows)]
-    reply = copilot.antwort_auf_nachricht(conn, history)
+    reply = openai_copilot.antwort_auf_nachricht(conn, history)
     partner = _partner_summary(db.get_vermittler_full(conn, reply.vermittler_nr)) if reply.vermittler_nr else None
     metadata = {
         "findings": reply.findings,

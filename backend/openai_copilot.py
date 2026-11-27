@@ -6,12 +6,15 @@ erkannte Angaben zuerst zur Prüfung und schreibt erst nach einem expliziten Kli
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 from typing import Any
 
 from . import db, obsidian
 from .config import settings
+
+logger = logging.getLogger("uvicorn.error")
 
 
 SYSTEM_INSTRUCTIONS = """
@@ -239,6 +242,7 @@ def antwort_auf_nachricht(conn: sqlite3.Connection, history: list[dict[str, str]
                     sources.append(source)
                 input_items.append({"type": "function_call_output", "call_id": call.call_id, "output": json.dumps(output, ensure_ascii=False, default=str)})
     except Exception:
+        logger.exception("OpenAI-Anfrage fehlgeschlagen")
         return CopilotReply(
             content="Die KI-Antwort konnte gerade nicht erzeugt werden. Bitte versuche es erneut.",
             configured=True,
