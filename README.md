@@ -87,3 +87,17 @@ POST /api/vermittler/4251/obsidian/eintraege
 Typen: `gespraech`, `telefonat`, `email`, `notiz`, `massnahme`, `dokument`, `sonstiges`.
 
 Hinweis: Die Werte für 2026 sind unterjährig; Wachstumsvergleiche besser zwischen abgeschlossenen Jahren.
+
+## Frontend (Prototyp)
+
+Die Next.js-Oberfläche liegt in `frontend/`. Sie bündelt links Chats, mittig die Unterhaltung und rechts erkannte Informationen oder manuelle Eingabe.
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Die UI verwendet derzeit synthetische Beispieldaten und einen Mock-Adapter. Der Vertrag steht in `frontend/lib/workspace-contracts.ts`; der Austauschpunkt ist `frontend/lib/mock-workspace-api.ts`.
+
+Geplante Anbindung an das vorhandene Backend: `GET /api/vermittler` für Suche/Listen, `GET /api/vermittler/{nr}/kontext` für die Akte, `POST /api/vermittler` und `PATCH /api/vermittler/{nr}` für Stammdaten sowie `POST /api/vermittler/{nr}/obsidian/eintraege` für bestätigte Notizen. Der Chat selbst benötigt zusätzlich eine Agent-/LLM-Schicht; das Backend stellt Daten und Werkzeuge bereit.
