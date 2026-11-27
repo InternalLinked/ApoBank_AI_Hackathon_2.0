@@ -1,0 +1,16 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:80"
+    volumes:
+      - ./data:/app/data
+      - ./vault:/app/vault
+    environment:
+      - APOBANK_DB_PATH=/app/data/apobank.db
+      - APOBANK_VAULT_PATH=/app/vault
+      - APOBANK_UPLOAD_PATH=/app/data/uploads
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
