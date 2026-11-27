@@ -18,6 +18,7 @@ import type {
   ProfileCategory,
   ProfileFact,
   SavedEntry,
+  StartSuggestion,
   Transcription,
   WorkspaceApi,
   WorkspaceSnapshot,
@@ -450,6 +451,7 @@ export function createWorkspaceApi(): WorkspaceApi {
       return {
         conversations,
         messagesByConversation,
+        accountName: typeof data.betreuerkonto === "string" ? data.betreuerkonto : null,
         partner: latestAssistant?.partner ?? null,
         findings: latestAssistant?.findings ?? [],
         aiConfigured: data.openai_configured === true,
@@ -489,10 +491,10 @@ export function createWorkspaceApi(): WorkspaceApi {
       await request<void>(`/chat/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" });
     },
 
-    async sendMessage(conversationId: string, content: string): Promise<ChatReply> {
+    async sendMessage(conversationId: string, content: string, startSuggestion?: StartSuggestion): Promise<ChatReply> {
       const data = record(await request<unknown>(`/chat/conversations/${conversationId}/messages`, {
         method: "POST",
-        body: JSON.stringify({ inhalt: content }),
+        body: JSON.stringify({ inhalt: content, startvorschlag: startSuggestion }),
       }));
       const message = toMessage(data.message);
       const fehler = record(data.fehler);

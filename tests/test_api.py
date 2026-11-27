@@ -304,10 +304,35 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "vault_path", tmp_path / "vault")
     monkeypatch.setattr(settings, "upload_path", tmp_path / "uploads")
     monkeypatch.setattr(settings, "openai_api_key", None)
+    monkeypatch.setattr(settings, "betreuerkonto_id", "SEB45322")
     import_excel.run(xlsx)
     from backend.main import app
     with TestClient(app) as c:
         yield c
+
+
+
+def test_startvorschlaege_sind_vorberechnet_und_top10_ist_kontobezogen(client, monkeypatch):
+    from backend import openai_copilot
+
+    def unerwarteter_modellaufruf(*args):
+        pytest.fail("Startvorschlaege brauchen keinen Modellaufruf")
+
+    monkeypatch.setattr(openai_copilot, "antwort_auf_nachricht", unerwarteter_modellaufruf)
+    workspace = client.get("/api/chat/workspace", headers=BROWSER_A)
+    assert workspace.json()["betreuerkonto"] == "Schumann"
+    chat_id = client.post("/api/chat/conversations", json={"titel": "Start"}, headers=BROWSER_A).json()["id"]
+    url = f"/api/chat/conversations/{chat_id}/messages"
+
+    # Startantworten verwenden den Datenstand beim Start, auch nach einer Aktenaenderung.
+    assert client.put("/api/vermittler/4251/geschaeftszahlen/2025",
+                      json={"volumen_eur": 1, "anzahl_darlehen": 1}).status_code == 200
+    for key in ("top10", "einbrueche", "gespraech", "marktgebiete", "portfolio", "notizen"):
+        response = client.post(url, json={"inhalt": key, "startvorschlag": key}, headers=BROWSER_A)
+        assert response.status_code == 200
+        if key == "top10":
+            [analyse] = response.json()["analysen"]
+            assert analyse["zeilen"] == [["Hans Baumann", 10773001]]
 
 
 def test_import_creates_db_and_vault(client):

@@ -3,6 +3,7 @@ import type { Conversation } from "@/lib/workspace-contracts";
 import { Icon } from "./Icons";
 
 type ChatSidebarProps = {
+  accountName: string | null;
   conversations: Conversation[];
   activeConversationId: string;
   mobileOpen: boolean;
@@ -13,6 +14,7 @@ type ChatSidebarProps = {
 };
 
 export function ChatSidebar({
+  accountName,
   conversations,
   activeConversationId,
   mobileOpen,
@@ -85,8 +87,8 @@ export function ChatSidebar({
       <div className="sidebar-bottom">
         <div className="sidebar-tip"><span className="tip-icon"><Icon name="sparkle" size={16} /></span><div><strong>Copilot-Tipp</strong><p>Frage in natürlicher Sprache nach einer Partnerakte oder einem Vorgang.</p></div></div>
         <button className="user-profile" type="button">
-          <span className="user-avatar">AM</span>
-          <span><strong>Adrian M.</strong><small>Persönlicher Bereich</small></span>
+          <span className="user-avatar">{accountName?.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() ?? "–"}</span>
+          <span><strong>{accountName ?? "Kein Betreuerkonto"}</strong><small>Persönlicher Bereich</small></span>
           <Icon name="more" size={17} />
         </button>
       </div>

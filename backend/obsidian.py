@@ -617,7 +617,7 @@ def set_summary(vermittler_nr: int, text: str, quelle: str | None = None) -> Non
     hub.write_text(_replace_block(content, "zusammenfassung", f"{text.strip()}\n\n{stand}"), encoding="utf-8")
 
 
-def search(query: str, limit: int = 20) -> list[dict[str, Any]]:
+def search(query: str, limit: int = 20, *, nur_eintraege: bool = False) -> list[dict[str, Any]]:
     """Einfache Volltextsuche ueber alle Vermittler-Notizen (Vorstufe zur Vektorsuche)."""
     root = abs_path("Vermittler")
     if not root.is_dir():
@@ -626,6 +626,8 @@ def search(query: str, limit: int = 20) -> list[dict[str, Any]]:
     q = query.lower()
     hits: list[dict[str, Any]] = []
     for p in root.rglob("*.md"):
+        if nur_eintraege and p.parent.name != "Eintraege":
+            continue
         text = p.read_text(encoding="utf-8")
         idx = text.lower().find(q)
         if idx == -1:

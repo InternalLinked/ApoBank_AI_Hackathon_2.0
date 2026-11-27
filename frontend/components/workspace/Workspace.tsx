@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createWorkspaceApi, errorMessage } from "@/lib/workspace-api";
-import type { ChangeProposal, ChatMessage, ExtractedFinding, ManualEntryInput, PartnerCandidate, PartnerDetail, PartnerSummary, WorkspaceApi, WorkspaceSnapshot } from "@/lib/workspace-contracts";
+import type { ChangeProposal, ChatMessage, ExtractedFinding, ManualEntryInput, PartnerCandidate, PartnerDetail, PartnerSummary, StartSuggestion, WorkspaceApi, WorkspaceSnapshot } from "@/lib/workspace-contracts";
 import { ChatSidebar } from "./ChatSidebar";
 import { ConversationPane } from "./ConversationPane";
 import { InspectorPanel } from "./InspectorPanel";
 import { Icon } from "./Icons";
 
 const emptyWorkspace: WorkspaceSnapshot = {
+  accountName: null,
   conversations: [],
   messagesByConversation: {},
   partner: null,
@@ -122,7 +123,8 @@ export function Workspace() {
     }));
   }
 
-  async function sendMessage(content: string) {
+  async function sendMessage(content: string, startSuggestion?: StartSuggestion) {
+    if (isSending) return;
     let conversationId = activeConversationId;
     if (!conversationId) {
       const conversation = await api.createConversation();
@@ -138,7 +140,10 @@ export function Workspace() {
     }));
     setIsSending(true);
     try {
-      const reply = await api.sendMessage(conversationId, content);
+      const request = api.sendMessage(conversationId, content, startSuggestion);
+      const reply = startSuggestion
+        ? (await Promise.all([request, new Promise<void>((resolve) => window.setTimeout(resolve, 2000))]))[0]
+        : await request;
       addMessage(conversationId, reply.message);
       setSnapshot((current) => ({ ...current, partner: reply.partner ?? current.partner, aiConfigured: reply.aiConfigured }));
       if (reply.partner) void loadPartnerDetail(reply.partner);
@@ -268,7 +273,7 @@ export function Workspace() {
   return (
     <div className={`workspace-shell ${inspectorCollapsed ? "inspector-collapsed" : ""}`}>
       {mobileDrawer && <button className="mobile-backdrop" aria-label="Seitenleiste schließen" onClick={() => setMobileDrawer(null)} />}
-      <ChatSidebar conversations={snapshot.conversations} activeConversationId={activeConversationId} mobileOpen={mobileDrawer === "chats"} onCloseMobile={() => setMobileDrawer(null)} onSelect={selectConversation} onNewConversation={createConversation} onDelete={deleteConversation} />
+      <ChatSidebar accountName={snapshot.accountName} conversations={snapshot.conversations} activeConversationId={activeConversationId} mobileOpen={mobileDrawer === "chats"} onCloseMobile={() => setMobileDrawer(null)} onSelect={selectConversation} onNewConversation={createConversation} onDelete={deleteConversation} />
       <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} onOpenDetails={() => setMobileDrawer("details")} inspectorCollapsed={inspectorCollapsed} onExpandInspector={() => setInspectorPinned(true)} onSelectCandidate={selectCandidate} onOpenPartner={openPartnerFromLink} onTranscribe={transcribeAudio} onError={setToast} onConfirmProposal={confirmProposal} onRejectProposal={rejectProposal} />
       <InspectorPanel partner={snapshot.partner} partnerDetail={partnerDetail} findings={findings} mobileOpen={mobileDrawer === "details"} onCloseMobile={() => { setInspectorPinned(false); setMobileDrawer(null); }} onSaveEntry={saveEntry} onConfirmFindings={confirmFindings} api={api} profileRefreshKey={profileRefreshKey} onError={setToast} onClosePartner={closePartner} />
       {toast && <div className="toast" role="status"><Icon name="check" size={16} />{toast}<button onClick={() => setToast("")} aria-label="Hinweis schließen"><Icon name="close" size={15} /></button></div>}

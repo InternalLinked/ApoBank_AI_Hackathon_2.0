@@ -139,3 +139,10 @@ docker compose exec apobank-copilot python -m backend.import_excel --excel /app/
 ```
 
 Die Quelldatei und die erzeugte SQLite-Datenbank bleiben aufgrund ihrer Sensibilität außerhalb von Git.
+
+### Konto und Chat-Startvorschläge
+
+`APOBANK_BETREUERKONTO_ID` wählt die Mitarbeiter-ID für das Konto unten links und für „Meine Top 10“.
+Der Standardwert für die Beispieldaten ist `MGK76244` (Hartmann). Das Demo-Konto gilt für diese
+Backend-Instanz. Die sechs Startantworten werden beim Start des Backends einmal aus Datenbank und Vault
+vorbereitet. Ein Neustart lädt den aktuellen Datenstand.
