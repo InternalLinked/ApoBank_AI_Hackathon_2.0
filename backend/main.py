@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import copilot, db, obsidian
@@ -104,6 +104,22 @@ def _chat_message(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": row["erstellt_am"],
         "metadata": _decode_metadata(row["metadaten_json"]),
     }
+
+
+CHAT_KONVERSATION_FIELDS = (
+    "c.id, c.titel, c.vermittler_nr, c.aktualisiert_am, "
+    "COALESCE((SELECT inhalt FROM chat_nachricht m WHERE m.konversation_id = c.id ORDER BY m.id DESC LIMIT 1), "
+    "'Noch keine Nachrichten') AS vorschau"
+)
+
+
+def _chat_konversation(conn: Conn, conversation_id: str) -> dict[str, Any]:
+    row = conn.execute(
+        f"SELECT {CHAT_KONVERSATION_FIELDS} FROM chat_konversation c WHERE c.id = ?", (conversation_id,)
+    ).fetchone()
+    if row is None:
+        raise HTTPException(404, "Chat nicht gefunden")
+    return dict(row)
 
 
 @app.get("/api/health", tags=["Meta"], summary="Laufzeitstatus fuer die Weboberflaeche")
@@ -491,10 +507,8 @@ def ueberblick(marktgebiet: str | None = None, filial_nr: int | None = None, mit
 @app.get("/api/chat/workspace", tags=["Chat"], summary="Gespeicherte Chatverlaeufe fuer die Weboberflaeche")
 def get_chat_workspace(conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
     conversations = db.rows_to_dicts(conn.execute(
-        "SELECT c.id, c.titel, c.vermittler_nr, c.aktualisiert_am, "
-        "COALESCE((SELECT inhalt FROM chat_nachricht m WHERE m.konversation_id = c.id ORDER BY m.id DESC LIMIT 1), "
-        "'Noch keine Nachrichten') AS vorschau "
-        "FROM chat_konversation c ORDER BY c.aktualisiert_am DESC, c.erstellt_am DESC"
+        f"SELECT {CHAT_KONVERSATION_FIELDS} FROM chat_konversation c "
+        "ORDER BY c.aktualisiert_am DESC, c.erstellt_am DESC"
     ).fetchall())
     messages: dict[str, list[dict[str, Any]]] = {}
     for conversation in conversations:
@@ -514,11 +528,17 @@ def get_chat_workspace(conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
 def create_chat_conversation(body: ChatKonversationCreate, conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
     conversation_id = str(uuid4())
     conn.execute("INSERT INTO chat_konversation (id, titel) VALUES (?, ?)", (conversation_id, body.titel.strip()))
-    row = conn.execute(
-        "SELECT id, titel, vermittler_nr, aktualisiert_am, 'Noch keine Nachrichten' AS vorschau "
-        "FROM chat_konversation WHERE id = ?", (conversation_id,)
-    ).fetchone()
-    return dict(row)
+    return _chat_konversation(conn, conversation_id)
+
+
+@app.delete("/api/chat/conversations/{conversation_id}", tags=["Chat"], status_code=204,
+            summary="Chat samt allen Nachrichten endgueltig loeschen")
+def delete_chat_conversation(conversation_id: str, conn: Conn = Depends(db.get_conn)) -> Response:
+    conn.execute("DELETE FROM chat_nachricht WHERE konversation_id = ?", (conversation_id,))
+    cursor = conn.execute("DELETE FROM chat_konversation WHERE id = ?", (conversation_id,))
+    if cursor.rowcount == 0:
+        raise HTTPException(404, "Chat nicht gefunden")
+    return Response(status_code=204)
 
 
 @app.post("/api/chat/conversations/{conversation_id}/messages", tags=["Chat"],

@@ -106,6 +106,27 @@ export function Workspace() {
     }
   }
 
+  async function deleteConversation(conversationId: string) {
+    try {
+      await api.deleteConversation(conversationId);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Der Chat konnte nicht gelöscht werden.");
+      return;
+    }
+    const remaining = snapshot.conversations.filter((conversation) => conversation.id !== conversationId);
+    const wasActive = conversationId === activeConversationId;
+    setSnapshot((current) => ({
+      ...current,
+      conversations: current.conversations.filter((conversation) => conversation.id !== conversationId),
+      messagesByConversation: Object.fromEntries(Object.entries(current.messagesByConversation).filter(([id]) => id !== conversationId)),
+      partner: wasActive ? null : current.partner,
+    }));
+    setToast("Der Chat wurde gelöscht.");
+    if (!wasActive) return;
+    if (remaining[0]) selectConversation(remaining[0].id);
+    else await createConversation();
+  }
+
   async function saveEntry(input: ManualEntryInput) {
     const saved = await api.createEntry(input);
     setToast(`${saved.label} wurde gespeichert.`);
@@ -136,7 +157,7 @@ export function Workspace() {
   return (
     <div className="workspace-shell">
       {mobileDrawer && <button className="mobile-backdrop" aria-label="Seitenleiste schließen" onClick={() => setMobileDrawer(null)} />}
-      <ChatSidebar conversations={snapshot.conversations} activeConversationId={activeConversationId} mobileOpen={mobileDrawer === "chats"} onCloseMobile={() => setMobileDrawer(null)} onSelect={selectConversation} onNewConversation={createConversation} />
+      <ChatSidebar conversations={snapshot.conversations} activeConversationId={activeConversationId} mobileOpen={mobileDrawer === "chats"} onCloseMobile={() => setMobileDrawer(null)} onSelect={selectConversation} onNewConversation={createConversation} onDelete={deleteConversation} />
       <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} onOpenDetails={() => setMobileDrawer("details")} />
       <InspectorPanel partner={snapshot.partner} findings={findings} mobileOpen={mobileDrawer === "details"} onCloseMobile={() => setMobileDrawer(null)} onSaveEntry={saveEntry} onConfirmFindings={confirmFindings} />
       {toast && <div className="toast" role="status"><Icon name="check" size={16} />{toast}<button onClick={() => setToast("")} aria-label="Hinweis schließen"><Icon name="close" size={15} /></button></div>}

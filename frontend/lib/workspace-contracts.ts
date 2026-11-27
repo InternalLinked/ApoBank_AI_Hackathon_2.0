@@ -89,6 +89,7 @@ export type ChatReply = {
 export interface WorkspaceApi {
   loadWorkspace(): Promise<WorkspaceSnapshot>;
   createConversation(): Promise<Conversation>;
+  deleteConversation(conversationId: string): Promise<void>;
   sendMessage(conversationId: string, content: string): Promise<ChatReply>;
   createEntry(input: ManualEntryInput): Promise<SavedEntry>;
   confirmFindings(conversationId: string, partner: PartnerSummary, findings: ExtractedFinding[]): Promise<void>;

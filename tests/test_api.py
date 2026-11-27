@@ -34,6 +34,17 @@ ROWS = [
 ]
 
 
+def test_chat_loeschen(client):
+    chat_id = client.post("/api/chat/conversations", json={"titel": "Test"}).json()["id"]
+    andere_id = client.post("/api/chat/conversations", json={"titel": "Bleibt"}).json()["id"]
+
+    assert client.delete(f"/api/chat/conversations/{chat_id}").status_code == 204
+    workspace = client.get("/api/chat/workspace").json()
+    assert [c["id"] for c in workspace["conversations"]] == [andere_id]
+    assert chat_id not in workspace["messages_by_conversation"]
+    assert client.delete(f"/api/chat/conversations/{chat_id}").status_code == 404
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     xlsx = tmp_path / "liste.xlsx"

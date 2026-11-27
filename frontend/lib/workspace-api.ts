@@ -23,6 +23,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const data = await response.json().catch(() => ({}));
     throw new Error(typeof data.detail === "string" ? data.detail : "Die Anfrage konnte nicht verarbeitet werden.");
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -170,6 +171,10 @@ export function createWorkspaceApi(): WorkspaceApi {
         method: "POST",
         body: JSON.stringify({ titel: "Neue Unterhaltung" }),
       }));
+    },
+
+    async deleteConversation(conversationId: string): Promise<void> {
+      await request<void>(`/chat/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" });
     },
 
     async sendMessage(conversationId: string, content: string): Promise<ChatReply> {
