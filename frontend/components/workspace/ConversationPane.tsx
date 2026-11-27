@@ -1,11 +1,15 @@
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { ChatMessage, Conversation, PartnerCandidate, PartnerSummary } from "@/lib/workspace-contracts";
+import type { ChangeProposal, ChatMessage, Conversation, PartnerCandidate, PartnerSummary, ProposalStatus } from "@/lib/workspace-contracts";
 import { AnalysisPanel } from "./AnalysisPanel";
+import { ChangesPanel } from "./ChangesPanel";
 import { Icon } from "./Icons";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { VoiceButton } from "./VoiceButton";
 
-type PaneTab = "chat" | "analyse";
+type PaneTab = "chat" | "analyse" | "aenderungen";
+
+/** Stufen der automatischen Modellwahl (backend/modellwahl.py) */
+const TIER_LABEL: Record<string, string> = { smalltalk: "schnell", analyse: "Analyse", aendern: "Änderung", standard: "Standard" };
 
 const STARTER_PROMPTS: Array<{ label: string; hint: string; prompt: string }> = [
   { label: "Top 10 nach Volumen", hint: "Ranking 2025 mit Diagramm", prompt: "Zeige die Top 10 Vermittler nach Volumen 2025." },
@@ -33,9 +37,12 @@ type ConversationPaneProps = {
   onOpenPartner: (vermittlerNr: number, name: string) => void;
   onTranscribe: (pcm: Blob, sampleRate: number) => Promise<string>;
   onError: (message: string) => void;
+  /** true = erfolgreich (Status wird lokal aktualisiert); Fehler zeigt der Aufrufer selbst an */
+  onConfirmProposal: (proposal: ChangeProposal) => Promise<boolean>;
+  onRejectProposal: (proposal: ChangeProposal) => Promise<boolean>;
 };
 
-export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, onOpenDetails, inspectorCollapsed, onExpandInspector, onSelectCandidate, onOpenPartner, onTranscribe, onError }: ConversationPaneProps) {
+export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, onOpenDetails, inspectorCollapsed, onExpandInspector, onSelectCandidate, onOpenPartner, onTranscribe, onError, onConfirmProposal, onRejectProposal }: ConversationPaneProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -49,15 +56,38 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
   const bottomRef = useRef<HTMLDivElement>(null);
   // Neueste Analyse zuerst
   const analyses = useMemo(() => messages.flatMap((message) => message.analyses ?? []).reverse(), [messages]);
+  // Status nach Klick sofort lokal übernehmen (beim nächsten Laden kommt er vom Server)
+  const [proposalStatus, setProposalStatus] = useState<Record<string, ProposalStatus>>({});
+  const [focusedProposalId, setFocusedProposalId] = useState<string | null>(null);
+  const proposals = useMemo(
+    () => messages.flatMap((message) => message.proposals ?? []).reverse().map((p) => ({ ...p, status: proposalStatus[p.id] ?? p.status })),
+    [messages, proposalStatus],
+  );
+  const openProposals = proposals.filter((p) => p.status === "offen").length;
+  const hasAnalyses = analyses.length > 0;
+  const hasProposals = proposals.length > 0;
+  // Ein leerer Tab wird nicht angezeigt – war er gewählt (z. B. nach Chatwechsel), zeigen wir den Chat
+  const activeTab: PaneTab = (tab === "analyse" && !hasAnalyses) || (tab === "aenderungen" && !hasProposals) ? "chat" : tab;
+
+  async function decide(proposal: ChangeProposal, confirm: boolean) {
+    const ok = await (confirm ? onConfirmProposal(proposal) : onRejectProposal(proposal));
+    if (ok) setProposalStatus((current) => ({ ...current, [proposal.id]: confirm ? "bestaetigt" : "verworfen" }));
+  }
+
+  function openProposal(id: string) {
+    setFocusedProposalId(id);
+    setTab("aenderungen");
+  }
 
   useEffect(() => {
-    if (tab === "chat") bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, tab]);
+    if (activeTab === "chat") bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length, activeTab]);
 
   // Anderer Chat gewählt → zurück zum Chat-Tab
   useEffect(() => {
     setTab("chat");
     setFocusedAnalysisId(null);
+    setFocusedProposalId(null);
   }, [conversation?.id]);
 
   function openAnalysis(id: string) {
@@ -96,19 +126,32 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
       <section className="conversation-heading">
         <div className="heading-mark"><Icon name="sparkle" size={15} /></div>
         <div className="heading-copy"><span>CHAT · {partner ? `PARTNERAKTE ${partner.partnerId}` : "PARTNERVERTRIEB"}</span><h1>{conversation?.title ?? "Neue Unterhaltung"}</h1></div>
-        <button className="heading-action" type="button"><Icon name="more" size={18} /></button>
       </section>
 
-      <div className="pane-tabs" role="tablist" aria-label="Ansicht">
-        <button type="button" role="tab" id="tab-chat" aria-controls="panel-chat" aria-selected={tab === "chat"} className={tab === "chat" ? "is-active" : ""} onClick={() => setTab("chat")}>
-          <Icon name="chat" size={14} /> Chat
-        </button>
-        <button type="button" role="tab" id="tab-analyse" aria-controls="panel-analyse" aria-selected={tab === "analyse"} className={tab === "analyse" ? "is-active" : ""} onClick={() => setTab("analyse")}>
-          <Icon name="filter" size={14} /> Analyse{analyses.length > 0 && <span className="pane-tab-count">{analyses.length}</span>}
-        </button>
-      </div>
+      {/* Tabs nur, wenn es neben dem Chat etwas zu zeigen gibt */}
+      {(hasAnalyses || hasProposals) && (
+        <div className="pane-tabs" role="tablist" aria-label="Ansicht">
+          <button type="button" role="tab" id="tab-chat" aria-controls="panel-chat" aria-selected={activeTab === "chat"} className={activeTab === "chat" ? "is-active" : ""} onClick={() => setTab("chat")}>
+            <Icon name="chat" size={14} /> Chat
+          </button>
+          {hasAnalyses && (
+            <button type="button" role="tab" id="tab-analyse" aria-controls="panel-analyse" aria-selected={activeTab === "analyse"} className={activeTab === "analyse" ? "is-active" : ""} onClick={() => setTab("analyse")}>
+              <Icon name="filter" size={14} /> Analyse<span className="pane-tab-count">{analyses.length}</span>
+            </button>
+          )}
+          {hasProposals && (
+            <button type="button" role="tab" id="tab-aenderungen" aria-controls="panel-aenderungen" aria-selected={activeTab === "aenderungen"} className={activeTab === "aenderungen" ? "is-active" : ""} onClick={() => setTab("aenderungen")}>
+              <Icon name="note" size={14} /> Änderungen{openProposals > 0 && <span className="pane-tab-count is-alert" aria-label={`${openProposals} offen`}>{openProposals}</span>}
+            </button>
+          )}
+        </div>
+      )}
 
-      {tab === "analyse" ? (
+      {activeTab === "aenderungen" ? (
+        <section className="pane-tab-panel" role="tabpanel" id="panel-aenderungen" aria-labelledby="tab-aenderungen">
+          <ChangesPanel proposals={proposals} focusedId={focusedProposalId} onConfirm={(p) => decide(p, true)} onReject={(p) => decide(p, false)} onBackToChat={() => setTab("chat")} />
+        </section>
+      ) : activeTab === "analyse" ? (
         <section className="pane-tab-panel" role="tabpanel" id="panel-analyse" aria-labelledby="tab-analyse">
           <AnalysisPanel analyses={analyses} focusedId={focusedAnalysisId} onBackToChat={() => setTab("chat")} />
         </section>
@@ -122,7 +165,14 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
             <article className={`message-row ${message.role}`} key={message.id}>
               {message.role === "assistant" && <div className="assistant-avatar"><Icon name="sparkle" size={15} /></div>}
               <div className="message-body">
-                <div className="message-meta"><strong>{message.role === "assistant" ? "Partner-Copilot" : "Du"}</strong><span>{message.createdAt}</span></div>
+                <div className="message-meta">
+                  <strong>{message.role === "assistant" ? "Partner-Copilot" : "Du"}</strong><span>{message.createdAt}</span>
+                  {message.model && (
+                    <span className="message-model" title={`Automatisch gewählt: ${TIER_LABEL[message.model.tier] ?? message.model.tier} · ${message.model.rounds} KI-Runde(n)`}>
+                      {message.model.name} · {TIER_LABEL[message.model.tier] ?? message.model.tier} · {message.model.seconds.toLocaleString("de-DE", { maximumFractionDigits: 1 })} s
+                    </span>
+                  )}
+                </div>
                 <div className={`message-card ${message.role === "user" ? "user-message-card" : "assistant-message-card"}`}>
                   {message.role === "assistant" ? <MessageMarkdown content={message.content} onOpenPartner={onOpenPartner} /> : <p>{message.content}</p>}
                   {message.metrics && <div className="metric-grid">{message.metrics.map((metric) => <div className={`metric-card tone-${metric.tone ?? "green"}`} key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.detail}</small></div>)}</div>}
@@ -152,6 +202,20 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
                           <Icon name="filter" size={14} /> Diagramm ansehen: {analysis.title} <Icon name="chevron" size={13} />
                         </button>
                       ))}
+                    </div>
+                  )}
+                  {message.proposals && (
+                    <div className="analysis-links">
+                      {message.proposals.map((proposal) => {
+                        const status = proposalStatus[proposal.id] ?? proposal.status;
+                        return (
+                          <button type="button" key={proposal.id} className={`proposal-link status-${status}`} onClick={() => openProposal(proposal.id)}>
+                            <Icon name={status === "bestaetigt" ? "check" : "note"} size={14} />
+                            {status === "offen" ? `${proposal.changes.length} ${proposal.changes.length === 1 ? "Änderung" : "Änderungen"} prüfen und bestätigen` : status === "bestaetigt" ? "Änderungen gespeichert" : "Änderungen verworfen"}
+                            <Icon name="chevron" size={13} />
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                   {message.source && <div className="message-source"><Icon name="file" size={14} /><span>{message.source}</span><Icon name="chevron" size={13} /></div>}
