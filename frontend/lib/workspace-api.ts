@@ -273,6 +273,15 @@ function toAnalysis(value: unknown, createdAt: string): Analysis | null {
     rowCount: typeof item.anzahl === "number" ? item.anzahl : rows.length,
     truncated: item.abgeschnitten === true,
     chart: { type, x: String(chart.x ?? columns[0] ?? ""), y: String(chart.y ?? columns[columns.length - 1] ?? ""), unit },
+    parameters: Array.isArray(item.parameter) ? item.parameter.map((raw) => {
+      const p = record(raw);
+      return {
+        name: String(p.name ?? ""),
+        label: String(p.label ?? p.name ?? ""),
+        options: Array.isArray(p.optionen) ? p.optionen.map((o) => ({ value: String(record(o).wert ?? ""), label: String(record(o).label ?? record(o).wert ?? "") })) : [],
+      };
+    }).filter((p) => p.name && p.options.length > 1) : [],
+    values: Object.fromEntries(Object.entries(record(item.werte)).map(([key, val]) => [key, String(val)])),
     createdAt,
   };
 }
@@ -503,6 +512,16 @@ export function createWorkspaceApi(): WorkspaceApi {
         method: "POST",
         body: JSON.stringify({ titel: "Neue Unterhaltung" }),
       }));
+    },
+
+    async rerunAnalysis(analysis: Analysis, values: Record<string, string>): Promise<Analysis> {
+      const data = await request<unknown>(`/chat/analysen/${encodeURIComponent(analysis.id)}/neu-berechnen`, {
+        method: "POST",
+        body: JSON.stringify({ werte: values }),
+      });
+      const updated = toAnalysis(data, analysis.createdAt);
+      if (!updated) throw new ApiError("Die Analyse konnte nicht neu berechnet werden.", null, "ANALYSE_ANTWORT", "POST /chat/analysen/.../neu-berechnen");
+      return updated;
     },
 
     async exportAnalysis(analysis: Analysis): Promise<string> {

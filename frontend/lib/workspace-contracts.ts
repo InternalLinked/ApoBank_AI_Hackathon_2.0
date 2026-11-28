@@ -69,7 +69,13 @@ export type ChangeProposal = {
   createdAt: string;
 };
 
-export type ChartType = "balken" | "linie" | "tabelle";
+export type AnalysisParameter = {
+  name: string;
+  label: string;
+  options: Array<{ value: string; label: string }>;
+};
+
+export type ChartType ="balken" | "linie" | "tabelle";
 export type ChartUnit = "eur" | "anzahl" | "prozent" | "keine";
 
 export type Analysis = {
@@ -82,6 +88,10 @@ export type Analysis = {
   rowCount: number;
   truncated: boolean;
   chart: { type: ChartType; x: string; y: string; unit: ChartUnit };
+  /** Auswahlfelder über dem Diagramm (von der KI festgelegt); Wechsel rechnet im Backend neu */
+  parameters: AnalysisParameter[];
+  /** aktuell gewählte Werte, z. B. { jahr: "2025", limit: "10" } */
+  values: Record<string, string>;
   /** Zeitpunkt der zugehörigen Antwort, z. B. „18:42“ */
   createdAt: string;
 };
@@ -223,6 +233,8 @@ export interface WorkspaceApi {
   loadWorkspace(): Promise<WorkspaceSnapshot>;
   /** Excel-Export (.xlsx, im Backend erzeugt); liefert den Dateinamen */
   exportAnalysis(analysis: Analysis): Promise<string>;
+  /** Analyse mit anderer Auswahl neu berechnen (gleiches SQL, keine neue KI-Frage) */
+  rerunAnalysis(analysis: Analysis, values: Record<string, string>): Promise<Analysis>;
   exportPartner(vermittlerNr: number): Promise<string>;
   /** Änderungsvorschlag der KI ausführen (409 bei Konflikt) bzw. verwerfen */
   confirmProposal(proposalId: string): Promise<{ partner: PartnerSummary | null }>;

@@ -84,6 +84,28 @@ export function Workspace() {
     }
   }
 
+  /** Auswahlfeld im Analyse-Tab geändert: Backend rechnet mit dem gespeicherten SQL neu (keine neue KI-Frage).
+   *  Das Ergebnis ersetzt die Analyse in der Nachricht – die Auswahl bleibt auch nach einem Tab-Wechsel. */
+  async function rerunAnalysis(analysis: Analysis, values: Record<string, string>): Promise<Analysis> {
+    try {
+      const updated = await api.rerunAnalysis(analysis, values);
+      setSnapshot((current) => {
+        const messagesByConversation: Record<string, ChatMessage[]> = {};
+        for (const [conversationId, messages] of Object.entries(current.messagesByConversation)) {
+          messagesByConversation[conversationId] = messages.map((message) =>
+            message.analyses?.some((item) => item.id === updated.id)
+              ? { ...message, analyses: message.analyses.map((item) => (item.id === updated.id ? updated : item)) }
+              : message);
+        }
+        return { ...current, messagesByConversation };
+      });
+      return updated;
+    } catch (error) {
+      setToast(errorMessage(error, "Die Analyse konnte nicht neu berechnet werden."));
+      throw error;
+    }
+  }
+
   async function rejectProposal(proposal: ChangeProposal): Promise<boolean> {
     try {
       await api.rejectProposal(proposal.id);
@@ -312,7 +334,7 @@ export function Workspace() {
     <div className={`workspace-shell ${inspectorCollapsed ? "inspector-collapsed" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       {mobileDrawer && <button className="mobile-backdrop" aria-label="Seitenleiste schließen" onClick={() => setMobileDrawer(null)} />}
       <ChatSidebar accountName={snapshot.accountName} conversations={snapshot.conversations} activeConversationId={activeConversationId} mobileOpen={mobileDrawer === "chats"} onCloseMobile={() => setMobileDrawer(null)} onSelect={selectConversation} onNewConversation={createConversation} onDelete={deleteConversation} />
-      <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)} onOpenDetails={openInspector} inspectorCollapsed={inspectorCollapsed} onExpandInspector={openInspector} onToggleInspector={() => (inspectorOpen ? hideInspector() : openInspector())} onSelectCandidate={selectCandidate} onOpenPartner={openPartnerFromLink} onTranscribe={transcribeAudio} onError={setToast} onConfirmProposal={confirmProposal} onRejectProposal={rejectProposal} onExportAnalysis={exportAnalysis} />
+      <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)} onOpenDetails={openInspector} inspectorCollapsed={inspectorCollapsed} onExpandInspector={openInspector} onToggleInspector={() => (inspectorOpen ? hideInspector() : openInspector())} onSelectCandidate={selectCandidate} onOpenPartner={openPartnerFromLink} onTranscribe={transcribeAudio} onError={setToast} onConfirmProposal={confirmProposal} onRejectProposal={rejectProposal} onExportAnalysis={exportAnalysis} onRerunAnalysis={rerunAnalysis} />
       <InspectorPanel partner={snapshot.partner} partnerDetail={partnerDetail} findings={findings} mobileOpen={mobileDrawer === "details"} onCloseMobile={hideInspector} onSaveEntry={saveEntry} onConfirmFindings={confirmFindings} api={api} profileRefreshKey={profileRefreshKey} onError={setToast} onClosePartner={closePartner} />
       {toast && <div className="toast" role="status"><Icon name="check" size={16} />{toast}<button onClick={() => setToast("")} aria-label="Hinweis schließen"><Icon name="close" size={15} /></button></div>}
     </div>

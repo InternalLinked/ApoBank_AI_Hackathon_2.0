@@ -93,6 +93,11 @@ class ProfilFaktIn(BaseModel):
     datum: date | None = Field(None, description="Wann die Info notiert/bekannt wurde, Standard: heute")
 
 
+class AnalyseNeuIn(BaseModel):
+    """Gewaehlte Werte der Auswahlfelder, z. B. {"jahr": "2024", "limit": "25"}."""
+    werte: dict[str, str] = Field(default_factory=dict, max_length=4)
+
+
 class ExportTabelleIn(BaseModel):
     """Analyse-Ergebnis fuer den Excel-Export (kommt aus dem Tab "Analyse")."""
     titel: str = Field("Analyse", min_length=1, max_length=120)

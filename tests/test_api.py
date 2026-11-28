@@ -336,7 +336,16 @@ def test_startvorschlaege_sind_vorberechnet_und_top10_ist_kontobezogen(client, m
         assert response.status_code == 200
         if key == "top10":
             [analyse] = response.json()["analysen"]
-            assert analyse["zeilen"] == [["Hans Baumann", 10773001]]
+            assert analyse["zeilen"] == [[4251, "Hans Baumann", 10773001]]
+            assert analyse["titel"] == "Meine Top 10 nach Kreditvolumen 2025"
+            assert [p["name"] for p in analyse["parameter"]] == ["jahr", "limit", "kennzahl", "sortierung"]
+            neu = client.post(f"/api/chat/analysen/{analyse['id']}/neu-berechnen",
+                              json={"werte": {"kennzahl": "anzahl", "sortierung": "asc", "limit": "5"}}, headers=BROWSER_A)
+            assert neu.status_code == 200, neu.text
+            assert neu.json()["diagramm"]["einheit"] == "anzahl" and neu.json()["titel"] == "Meine Top 5 nach Anzahl Darlehen 2025"
+            # Betreuerkonto ist fest gebunden und nicht von aussen waehlbar
+            assert client.post(f"/api/chat/analysen/{analyse['id']}/neu-berechnen",
+                               json={"werte": {"konto": "MGK76244"}}, headers=BROWSER_A).status_code == 422
 
 
 def test_import_creates_db_and_vault(client):
@@ -770,6 +779,62 @@ def test_vermittlersuche_mit_titel_und_namensgleichen(client):
         assert sorted(treffer("Baumann")) == [("Hans", "Baumann"), ("Susanne", "Baumann")]  # echt mehrdeutig
     finally:
         conn.close()
+
+
+class _FakeParameterOpenAI(_FakeOpenAI):
+    SQL = ("SELECT v.vermittler_nr, TRIM(COALESCE(v.titel || ' ', '') || v.vorname || ' ' || v.name) AS vermittler, "
+           "SUM(CASE :kennzahl WHEN 'anzahl' THEN g.anzahl_darlehen ELSE g.volumen_eur END) AS wert "
+           "FROM v_vermittler v JOIN geschaeftszahlen g ON g.vermittler_nr = v.vermittler_nr "
+           "WHERE g.sparte = 'gesamt' AND (:jahr = 'gesamt' OR g.jahr = :jahr) "
+           "GROUP BY v.vermittler_nr ORDER BY wert DESC LIMIT :limit")
+    PARAMETER = [
+        {"name": "jahr", "label": "Jahr", "standard": "2025", "optionen": [
+            {"wert": "2024", "label": "2024", "einheit": ""}, {"wert": "2025", "label": "2025", "einheit": ""},
+            {"wert": "gesamt", "label": "alle Jahre", "einheit": ""}]},
+        {"name": "limit", "label": "Anzahl", "standard": "2", "optionen": [
+            {"wert": "1", "label": "Top 1", "einheit": ""}, {"wert": "2", "label": "Top 2", "einheit": ""}]},
+        {"name": "kennzahl", "label": "Kennzahl", "standard": "volumen", "optionen": [
+            {"wert": "volumen", "label": "Volumen", "einheit": "eur"}, {"wert": "anzahl", "label": "Anzahl Darlehen", "einheit": "anzahl"}]},
+        {"name": "gibtsnicht", "label": "x", "standard": "a", "optionen": [  # kommt im SQL nicht vor -> verworfen
+            {"wert": "a", "label": "a", "einheit": ""}, {"wert": "b", "label": "b", "einheit": ""}]},
+    ]
+
+    def create(self, model, instructions, tools, input, **_):
+        from backend import openai_copilot
+        schon = any(isinstance(i, dict) and i.get("type") == "function_call_output" for i in input)
+        if instructions == openai_copilot.ANALYSE_INSTRUCTIONS or schon:
+            return _FakeResponse(text="KEINE" if instructions == openai_copilot.ANALYSE_INSTRUCTIONS else "Fertig.")
+        return _FakeResponse([_FakeCall("sql_analyse", {
+            "titel": "Top {limit} nach {kennzahl} ({jahr})", "sql": self.SQL, "parameter": self.PARAMETER,
+            "diagramm": {"typ": "balken", "x": "vermittler", "y": "wert", "einheit": "eur"}}, "c1")])
+
+
+def test_analyse_auswahlfelder_berechnen_neu_ohne_ki(client, monkeypatch):
+    import openai
+
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    monkeypatch.setattr(openai, "OpenAI", _FakeParameterOpenAI)
+    chat_id = client.post("/api/chat/conversations", json={"titel": "t"}, headers=BROWSER_A).json()["id"]
+    r = client.post(f"/api/chat/conversations/{chat_id}/messages", json={"inhalt": "Wer ist Top-Vermittler?"}, headers=BROWSER_A)
+    [analyse] = r.json()["analysen"]
+    assert [p["name"] for p in analyse["parameter"]] == ["jahr", "limit", "kennzahl"]   # wirkungsloses Feld verworfen
+    assert analyse["titel"] == "Top Top 2 nach Volumen (2025)" and analyse["werte"] == {"jahr": "2025", "limit": "2", "kennzahl": "volumen"}
+    assert [z[1] for z in analyse["zeilen"]] == ["Martin Otto", "Dr. Hans Baumann"] and analyse["spalten"][0] == "vermittler_nr"
+
+    url = f"/api/chat/analysen/{analyse['id']}/neu-berechnen"
+    neu = client.post(url, json={"werte": {"jahr": "2024", "limit": "1"}}, headers=BROWSER_A)
+    assert neu.status_code == 200, neu.text
+    assert neu.json()["zeilen"] == [[4251, "Dr. Hans Baumann", 21242499]]               # 2024 fuehrt Baumann
+    anzahl = client.post(url, json={"werte": {"kennzahl": "anzahl"}}, headers=BROWSER_A).json()
+    assert anzahl["diagramm"]["einheit"] == "anzahl" and anzahl["werte"]["jahr"] == "2024"  # Auswahl bleibt erhalten
+
+    # Nur erlaubte Werte, nur eigener Browser
+    assert client.post(url, json={"werte": {"jahr": "1999"}}, headers=BROWSER_A).status_code == 422
+    assert client.post(url, json={"werte": {"limit": "1; DROP TABLE vermittler"}}, headers=BROWSER_A).status_code == 422
+    assert client.post(url, json={"werte": {"jahr": "2024"}}, headers=BROWSER_B).status_code == 404
+    # Nach dem Neuladen steht die zuletzt gewaehlte Auswahl im Verlauf
+    verlauf = client.get("/api/chat/workspace", headers=BROWSER_A).json()["messages_by_conversation"][chat_id]
+    assert verlauf[-1]["metadata"]["analysen"][0]["werte"]["kennzahl"] == "anzahl"
 
 
 def test_copilot_speichert_nichts_bei_unbekanntem_vermittler(client):

@@ -24,9 +24,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import aenderungen, anhaenge, db, excel_export, obsidian, openai_copilot, transcribe, vermittler_links
+from . import aenderungen, analysen, anhaenge, db, excel_export, obsidian, openai_copilot, transcribe, vermittler_links
 from .config import settings
-from .schemas import (ChatKonversationCreate, ChatNachrichtIn, EintragIn, ExportTabelleIn, GeschaeftszahlIn, ProfilFaktIn,
+from .schemas import (AnalyseNeuIn, ChatKonversationCreate, ChatNachrichtIn, EintragIn, ExportTabelleIn, GeschaeftszahlIn, ProfilFaktIn,
                       SqlQueryIn, VermittlerCreate, VermittlerUpdate, ZusammenfassungIn)
 
 @asynccontextmanager
@@ -604,10 +604,50 @@ def _analyse_startantwort(titel: str, beschreibung: str, spalten: list[str], zei
     )
 
 
+_TOP_SQL = (
+    "SELECT v.vermittler_nr AS vermittler_nr, TRIM(COALESCE(v.vorname || ' ', '') || v.name) AS Vermittler, "
+    "CASE :kennzahl WHEN 'anzahl' THEN g.anzahl_darlehen ELSE g.volumen_eur END AS Wert "
+    "FROM v_vermittler v JOIN geschaeftszahlen g ON g.vermittler_nr = v.vermittler_nr "
+    "WHERE g.sparte = 'gesamt' AND g.jahr = :jahr AND v.mitarbeiter_id = :konto "
+    "AND (CASE :kennzahl WHEN 'anzahl' THEN g.anzahl_darlehen ELSE g.volumen_eur END) IS NOT NULL "
+    "ORDER BY CASE :sortierung WHEN 'asc' THEN Wert ELSE -Wert END, v.vermittler_nr LIMIT :limit"
+)
+
+
+def _top_vermittler_analyse(conn: Conn) -> dict[str, Any] | None:
+    """Startvorschlag 'Top-Vermittler' mit Dropdowns (Jahr, Anzahl, Kennzahl, Sortierung) – Neuberechnung ohne KI."""
+    jahre = [r[0] for r in conn.execute(
+        "SELECT DISTINCT jahr FROM geschaeftszahlen WHERE sparte = 'gesamt' ORDER BY jahr DESC").fetchall()][:analysen.MAX_OPTIONEN]
+    if not jahre:
+        return None
+    standard_jahr = 2025 if 2025 in jahre else jahre[0]
+    parameter = [
+        {"name": "jahr", "label": "Jahr", "standard": str(standard_jahr),
+         "optionen": [{"wert": str(j), "label": str(j), "einheit": ""} for j in jahre]},
+        {"name": "limit", "label": "Anzahl Vermittler", "standard": "10",
+         "optionen": [{"wert": str(n), "label": str(n), "einheit": ""} for n in (5, 10, 25, 50)]},
+        {"name": "kennzahl", "label": "Kennzahl", "standard": "volumen", "optionen": [
+            {"wert": "volumen", "label": "Kreditvolumen", "einheit": "eur"},
+            {"wert": "anzahl", "label": "Anzahl Darlehen", "einheit": "anzahl"}]},
+        {"name": "sortierung", "label": "Sortierung", "standard": "desc", "optionen": [
+            {"wert": "desc", "label": "Größte zuerst", "einheit": ""},
+            {"wert": "asc", "label": "Kleinste zuerst", "einheit": ""}]},
+    ]
+    basis = {
+        "titel_vorlage": "Meine Top {limit} nach {kennzahl} {jahr}", "titel": "Meine Top-Vermittler",
+        "sql": _TOP_SQL,
+        "feste_werte": {"konto": settings.betreuerkonto_id},
+        "diagramm_basis": {"typ": "balken", "x": "Vermittler", "y": "Wert", "einheit": "eur"},
+        "parameter": parameter,
+    }
+    analyse = analysen.ausfuehren(basis)
+    return analyse if analyse["zeilen"] else None
+
+
 def _startvorschlaege(conn: Conn) -> tuple[str | None, dict[str, openai_copilot.CopilotReply]]:
     konto = conn.execute("SELECT name FROM betreuer WHERE mitarbeiter_id = ?",
                          (settings.betreuerkonto_id,)).fetchone()
-    top = ranking(jahr=2025, mitarbeiter_id=settings.betreuerkonto_id, limit=10, conn=conn)["items"] if konto else []
+    top = _top_vermittler_analyse(conn) if konto else None
     rueckgaenge = wachstum(2024, 2025, richtung="asc", min_basis_eur=0, limit=10, conn=conn)["items"]
     regionen = ranking(gruppe="marktgebiet", jahr=2025, limit=500, conn=conn)["items"]
     portfolio = ueberblick(conn=conn)
@@ -616,12 +656,12 @@ def _startvorschlaege(conn: Conn) -> tuple[str | None, dict[str, openai_copilot.
         return " ".join(str(row[key]) for key in ("vorname", "name") if row.get(key)) or str(row["vermittler_nr"])
 
     antworten = {
-        "top10": _analyse_startantwort(
-            "Meine Top 10 nach Kreditvolumen 2025",
-            f"{len(top)} Vermittler aus dem Portfolio von {konto['name']}." if top else
-            ("Für dieses Betreuerkonto liegen 2025 keine Volumendaten vor." if konto else
-             "Dem angezeigten Konto ist kein Betreuer zugeordnet."),
-            ["Vermittler", "Volumen (EUR)"], [[name(r), r["volumen_eur"]] for r in top], diagramm=True,
+        "top10": openai_copilot.CopilotReply(
+            content=f"**{top['titel']}**\n\n{top['anzahl']} Vermittler aus dem Portfolio von mir." if top else
+            ("**Meine Top 10 nach Kreditvolumen 2025**\n\n"
+             + ("Für dieses Betreuerkonto liegen 2025 keine Volumendaten vor." if konto else
+                "Dem angezeigten Konto ist kein Betreuer zugeordnet.")),
+            configured=bool(settings.openai_api_key), analysen=[top] if top else [],
         ),
         "einbrueche": _analyse_startantwort(
             "Größte Volumeneinbrüche 2024 → 2025",
@@ -712,9 +752,14 @@ def get_chat_workspace(request: Request, client: str = Depends(client_id), conn:
         # Aktuellen Status der Aenderungsvorschlaege (offen/bestaetigt/verworfen) in die Metadaten spiegeln
         status = dict(conn.execute("SELECT id, status FROM chat_aenderung WHERE konversation_id = ?",
                                    (conversation["id"],)).fetchall())
+        # Analysen in der zuletzt gewaehlten Auswahl (Dropdowns) zeigen, nicht im Ursprungszustand
+        aktuell = {r["id"]: json.loads(r["analyse_json"]) for r in conn.execute(
+            "SELECT id, analyse_json FROM chat_analyse WHERE konversation_id = ?", (conversation["id"],))}
         for message in messages[conversation["id"]]:
             for vorschlag in message["metadata"].get("aenderungsvorschlaege") or []:
                 vorschlag["status"] = status.get(vorschlag.get("id"), vorschlag.get("status"))
+            if message["metadata"].get("analysen"):
+                message["metadata"]["analysen"] = [aktuell.get(a.get("id"), a) for a in message["metadata"]["analysen"]]
     return {
         "conversations": conversations,
         "messages_by_conversation": messages,
@@ -844,6 +889,10 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, request: Requ
     partner = _partner_summary(db.get_vermittler_full(conn, reply.vermittler_nr)) if reply.vermittler_nr else None
     # Aenderungsvorschlaege serverseitig ablegen: Bestaetigt wird spaeter nur, was hier gespeichert ist
     # (der Browser kann den Inhalt nicht manipulieren, nur per ID bestaetigen).
+    # Analysen ablegen: Grundlage fuer das Neuberechnen ueber die Dropdowns im Tab "Analyse"
+    for analyse in reply.analysen:
+        conn.execute("INSERT OR REPLACE INTO chat_analyse (id, konversation_id, client_id, analyse_json) VALUES (?, ?, ?, ?)",
+                     (analyse["id"], conversation_id, client, json.dumps(analyse, ensure_ascii=False, default=str)))
     vorschlaege = []
     for vorschlag in reply.vorschlaege:
         vorschlag_id = uuid4().hex[:12]
@@ -880,6 +929,29 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, request: Requ
     return {"message": _chat_message(message), "partner": partner, "findings": reply.findings,
             "openai_configured": reply.configured, "fehler": reply.fehler, "kandidaten": reply.kandidaten,
             "analysen": reply.analysen, "aenderungsvorschlaege": vorschlaege, "modell": reply.modell}
+
+
+@app.post("/api/chat/analysen/{analyse_id}/neu-berechnen", tags=["Chat"],
+          summary="Analyse mit anderer Auswahl (Jahr, Top-N, Kennzahl ...) neu berechnen – ohne neue KI-Frage")
+def analyse_neu_berechnen(analyse_id: str, body: AnalyseNeuIn, request: Request, client: str = Depends(client_id),
+                          conn: Conn = Depends(db.get_conn)) -> Any:
+    """Fuehrt das gespeicherte SQL der Analyse read-only mit den gewaehlten, vorher erlaubten Werten aus."""
+    row = conn.execute("SELECT analyse_json FROM chat_analyse WHERE id = ? AND client_id = ?", (analyse_id, client)).fetchone()
+    if row is None:
+        raise HTTPException(404, "Analyse nicht gefunden")
+    analyse = json.loads(row["analyse_json"])
+    if not analyse.get("parameter"):
+        raise HTTPException(409, "Diese Analyse hat keine Auswahlfelder.")
+    try:
+        neu = analysen.ausfuehren(analyse, body.werte)
+    except analysen.AnalyseFehler as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except db.SqlFehler as exc:
+        logger.warning("Analyse %s neu berechnen fehlgeschlagen: %s", analyse_id, exc)
+        return _fehler_json(request, 400, f"Die Abfrage konnte nicht ausgefuehrt werden: {exc}", "ANALYSE_SQL")
+    conn.execute("UPDATE chat_analyse SET analyse_json = ?, geaendert_am = datetime('now') WHERE id = ?",
+                 (json.dumps(neu, ensure_ascii=False, default=str), analyse_id))
+    return neu
 
 
 def _eigener_vorschlag(conn: Conn, vorschlag_id: str, client: str) -> sqlite3.Row:

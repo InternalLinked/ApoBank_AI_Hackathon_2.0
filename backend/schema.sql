@@ -121,6 +121,17 @@ CREATE TABLE IF NOT EXISTS chat_anhang (
     erstellt_am        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Analysen aus dem Chat (SQL, Auswahlfelder, aktuelles Ergebnis). Ermoeglicht das Neuberechnen ueber die
+-- Dropdowns im Tab "Analyse" ohne neue KI-Frage; die aktuelle Auswahl bleibt beim Neuladen erhalten.
+CREATE TABLE IF NOT EXISTS chat_analyse (
+    id                 TEXT PRIMARY KEY,
+    konversation_id    TEXT NOT NULL REFERENCES chat_konversation(id) ON DELETE CASCADE,
+    client_id          TEXT,
+    analyse_json       TEXT NOT NULL,
+    erstellt_am        TEXT NOT NULL DEFAULT (datetime('now')),
+    geaendert_am       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Aenderungsvorschlaege der KI (Stammdaten, Kontakt, Geschaeftszahlen, Profil). Werden erst nach
 -- Klick auf "Bestaetigen" im Tab "Aenderungen" ausgefuehrt; gebunden an Chat + Browser-ID.
 CREATE TABLE IF NOT EXISTS chat_aenderung (

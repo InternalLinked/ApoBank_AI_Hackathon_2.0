@@ -16,7 +16,7 @@ const GRID = "#e6ebf2";
 const AXIS_TEXT = "#6b7a88";
 const MAX_BARS = 25;
 
-type Point = { label: string; value: number };
+export type Point = { label: string; value: number; rowIndex: number };
 
 export function formatValue(value: number, unit: ChartUnit, compact = false): string {
   if (unit === "eur") {
@@ -28,7 +28,7 @@ export function formatValue(value: number, unit: ChartUnit, compact = false): st
   return value.toLocaleString("de-DE", { maximumFractionDigits: unit === "anzahl" ? 0 : 2 });
 }
 
-function toNumber(cell: string | number | null): number | null {
+export function toNumber(cell: string | number | null): number | null {
   if (typeof cell === "number") return Number.isFinite(cell) ? cell : null;
   if (typeof cell === "string" && cell.trim() !== "" && Number.isFinite(Number(cell))) return Number(cell);
   return null;
@@ -41,7 +41,7 @@ export function chartPoints(analysis: Analysis): Point[] | null {
   const yi = analysis.columns.indexOf(analysis.chart.y);
   if (xi < 0 || yi < 0 || xi === yi) return null;
   const points = analysis.rows
-    .map((row) => ({ label: row[xi] == null ? "–" : String(row[xi]), value: toNumber(row[yi]) }))
+    .map((row, rowIndex) => ({ label: row[xi] == null ? "–" : String(row[xi]), value: toNumber(row[yi]), rowIndex }))
     .filter((point): point is Point => point.value !== null);
   return points.length > 0 ? points : null;
 }
@@ -73,7 +73,7 @@ function barPath(x0: number, x1: number, y: number, h: number): string {
   return `M${x0},${y} H${x1 + r} Q${x1},${y} ${x1},${y + r} V${y + h - r} Q${x1},${y + h} ${x1 + r},${y + h} H${x0} Z`;
 }
 
-type TooltipState = { left: number; top: number; label: string; value: string } | null;
+type TooltipState = { left: number; top: number; label: string; value: string; hint?: string } | null;
 
 function Tooltip({ tip }: { tip: TooltipState }) {
   if (!tip) return null;
@@ -81,11 +81,19 @@ function Tooltip({ tip }: { tip: TooltipState }) {
     <div className="chart-tooltip" style={{ left: `${tip.left}%`, top: `${tip.top}%` }} role="status">
       <span>{tip.label}</span>
       <strong>{tip.value}</strong>
+      {tip.hint && <em>{tip.hint}</em>}
     </div>
   );
 }
 
-function BarChart({ points, unit, title }: { points: Point[]; unit: ChartUnit; title: string }) {
+type SelectProps = {
+  /** Klick/Enter auf einen Balken (z. B. Partnerakte öffnen); ohne → nicht klickbar */
+  onSelect?: (point: Point) => void;
+  /** Hinweis im Tooltip, z. B. „Klicken öffnet die Partnerakte“ */
+  selectHint?: string;
+};
+
+function BarChart({ points, unit, title, onSelect, selectHint }: { points: Point[]; unit: ChartUnit; title: string } & SelectProps) {
   const [hover, setHover] = useState<number | null>(null);
   const shown = points.slice(0, MAX_BARS);
   const labelChars = Math.min(28, Math.max(...shown.map((p) => p.label.length)));
@@ -107,10 +115,11 @@ function BarChart({ points, unit, title }: { points: Point[]; unit: ChartUnit; t
     top: ((top + hover * rowH + rowH / 2) / H) * 100,
     label: shown[hover].label,
     value: formatValue(shown[hover].value, unit),
+    hint: onSelect ? selectHint : undefined,
   };
 
   return (
-    <div className="chart-frame">
+    <div className={onSelect ? "chart-frame is-selectable" : "chart-frame"}>
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${title}: Balkendiagramm mit ${shown.length} Einträgen`} onMouseLeave={() => setHover(null)}>
         {ticks.map((t) => (
           <g key={t}>
@@ -133,7 +142,14 @@ function BarChart({ points, unit, title }: { points: Point[]; unit: ChartUnit; t
                 <text x={Math.max(x0, x1) + 6} y={y + barH / 2} dominantBaseline="central" className="chart-value-text">{formatValue(p.value, unit, true)}</text>
               )}
               {/* Trefferfläche größer als der Balken: ganze Zeile */}
-              <rect x={0} y={top + i * rowH} width={W} height={rowH} fill="transparent" onMouseEnter={() => setHover(i)} onFocus={() => setHover(i)} tabIndex={0} aria-label={`${p.label}: ${formatValue(p.value, unit)}`} />
+              <rect x={0} y={top + i * rowH} width={W} height={rowH} fill="transparent" onMouseEnter={() => setHover(i)} onFocus={() => setHover(i)} tabIndex={0}
+                aria-label={`${p.label}: ${formatValue(p.value, unit)}${onSelect && selectHint ? ` – ${selectHint}` : ""}`}
+                role={onSelect ? "button" : undefined}
+                className={onSelect ? "chart-hit is-clickable" : "chart-hit"}
+                onClick={onSelect ? () => onSelect(p) : undefined}
+                onKeyDown={onSelect ? (event) => {
+                  if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(p); }
+                } : undefined} />
             </g>
           );
         })}
@@ -196,10 +212,10 @@ function LineChart({ points, unit, title }: { points: Point[]; unit: ChartUnit; 
   );
 }
 
-export function AnalysisChart({ analysis }: { analysis: Analysis }) {
+export function AnalysisChart({ analysis, onSelect, selectHint }: { analysis: Analysis } & SelectProps) {
   const points = useMemo(() => chartPoints(analysis), [analysis]);
   if (!points) return null;
   return analysis.chart.type === "linie"
     ? <LineChart points={points} unit={analysis.chart.unit} title={analysis.title} />
-    : <BarChart points={points} unit={analysis.chart.unit} title={analysis.title} />;
+    : <BarChart points={points} unit={analysis.chart.unit} title={analysis.title} onSelect={onSelect} selectHint={selectHint} />;
 }

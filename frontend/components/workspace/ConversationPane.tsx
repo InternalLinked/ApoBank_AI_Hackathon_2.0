@@ -55,9 +55,11 @@ type ConversationPaneProps = {
   onRejectProposal: (proposal: ChangeProposal) => Promise<boolean>;
   /** Analyse-Ergebnis als Excel herunterladen */
   onExportAnalysis: (analysis: Analysis) => Promise<void>;
+  /** Auswahlfeld über dem Diagramm geändert → Backend rechnet neu (wirft bei Fehler, Hinweis kommt vom Aufrufer) */
+  onRerunAnalysis: (analysis: Analysis, values: Record<string, string>) => Promise<Analysis>;
 };
 
-export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, sidebarCollapsed, onToggleSidebar, onOpenDetails, inspectorCollapsed, onExpandInspector, onToggleInspector, onSelectCandidate, onOpenPartner, onTranscribe, onError, onConfirmProposal, onRejectProposal, onExportAnalysis }: ConversationPaneProps) {
+export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, sidebarCollapsed, onToggleSidebar, onOpenDetails, inspectorCollapsed, onExpandInspector, onToggleInspector, onSelectCandidate, onOpenPartner, onTranscribe, onError, onConfirmProposal, onRejectProposal, onExportAnalysis, onRerunAnalysis }: ConversationPaneProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -191,7 +193,8 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
         </section>
       ) : activeTab === "analyse" ? (
         <section className="pane-tab-panel" role="tabpanel" id="panel-analyse" aria-labelledby="tab-analyse">
-          <AnalysisPanel analyses={analyses} focusedId={focusedAnalysisId} onBackToChat={() => setTab("chat")} onExport={onExportAnalysis} />
+          <AnalysisPanel analyses={analyses} focusedId={focusedAnalysisId} onBackToChat={() => setTab("chat")} onExport={onExportAnalysis}
+            onRerun={onRerunAnalysis} onOpenPartner={onOpenPartner} />
         </section>
       ) : (
       <section className="pane-tab-panel" role="tabpanel" id="panel-chat" aria-labelledby="tab-chat">

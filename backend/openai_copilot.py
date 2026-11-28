@@ -16,7 +16,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import aenderungen, db, modellwahl, obsidian
+from . import aenderungen, analysen, db, modellwahl, obsidian
 from . import anhaenge as anhang_modul, vermittler_links
 from .config import settings
 
@@ -186,7 +186,21 @@ TOOLS: list[dict[str, Any]] = [
             "IMMER mit sparte = 'gesamt' filtern. Jahre 2023-2026, 2026 ist unterjaehrig.\n"
             "Join: v_vermittler v JOIN geschaeftszahlen g ON g.vermittler_nr = v.vermittler_nr.\n"
             "Regeln: sprechende Spaltenaliase (z. B. AS vermittler, AS volumen_eur), sinnvoll sortieren, "
-            "Rankings mit LIMIT (Standard 10). Vollnamen als TRIM(COALESCE(v.titel || ' ', '') || v.vorname || ' ' || v.name)."
+            "Rankings mit LIMIT (Standard 10). Vollnamen als TRIM(COALESCE(v.titel || ' ', '') || v.vorname || ' ' || v.name).\n"
+            "Geht es um einzelne Vermittler, IMMER v.vermittler_nr als erste Spalte mitliefern (wird nicht angezeigt, "
+            "damit ein Klick im Diagramm die Partnerakte oeffnet).\n"
+            "AUSWAHLFELDER (parameter): Biete ueber dem Diagramm passende Dropdowns an, indem du im SQL benannte "
+            "Platzhalter nutzt und sie in `parameter` beschreibst – der Nutzer kann dann ohne neue Frage umschalten. "
+            "Typisch: :jahr (2023, 2024, 2025, 2026 und 'gesamt'), :limit (5, 10, 25), :kennzahl ('volumen' -> einheit eur, "
+            "'anzahl' -> einheit anzahl). Werte sind Text; Zahlen werden automatisch als Zahl gebunden. "
+            "Im titel {name} fuer den gewaehlten Wert verwenden. Beispiel:\n"
+            "SELECT v.vermittler_nr, TRIM(COALESCE(v.titel || ' ', '') || v.vorname || ' ' || v.name) AS vermittler, "
+            "SUM(CASE :kennzahl WHEN 'anzahl' THEN g.anzahl_darlehen ELSE g.volumen_eur END) AS wert "
+            "FROM v_vermittler v JOIN geschaeftszahlen g ON g.vermittler_nr = v.vermittler_nr "
+            "WHERE g.sparte = 'gesamt' AND (:jahr = 'gesamt' OR g.jahr = :jahr) "
+            "GROUP BY v.vermittler_nr ORDER BY wert DESC LIMIT :limit\n"
+            "-> titel 'Top {limit} Vermittler nach {kennzahl} ({jahr})', diagramm x vermittler, y wert. "
+            "Keine Auswahl sinnvoll (z. B. Einzelwert)? Dann parameter = []."
         ),
         "strict": True,
         "parameters": {
@@ -206,8 +220,36 @@ TOOLS: list[dict[str, Any]] = [
                     "required": ["typ", "x", "y", "einheit"],
                     "additionalProperties": False,
                 },
+                "parameter": {
+                    "type": "array",
+                    "description": "Auswahlfelder ueber dem Diagramm; jeder name muss als :name im SQL vorkommen",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Platzhalter ohne Doppelpunkt, z. B. jahr"},
+                            "label": {"type": "string", "description": "Beschriftung, z. B. 'Jahr'"},
+                            "standard": {"type": "string", "description": "Vorausgewaehlter Wert"},
+                            "optionen": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "wert": {"type": "string"},
+                                        "label": {"type": "string"},
+                                        "einheit": {"type": "string", "enum": ["eur", "anzahl", "prozent", "keine", ""],
+                                                    "description": "Einheit des Ergebnisses bei dieser Wahl ('' = unveraendert)"},
+                                    },
+                                    "required": ["wert", "label", "einheit"],
+                                    "additionalProperties": False,
+                                },
+                            },
+                        },
+                        "required": ["name", "label", "standard", "optionen"],
+                        "additionalProperties": False,
+                    },
+                },
             },
-            "required": ["titel", "sql", "diagramm"],
+            "required": ["titel", "sql", "diagramm", "parameter"],
             "additionalProperties": False,
         },
     },
@@ -435,34 +477,28 @@ def _sql_analyse(arguments: dict[str, Any]) -> tuple[dict[str, Any], dict[str, A
 
     sql = str(arguments["sql"]).strip().rstrip(";").strip()
     diagramm = dict(arguments.get("diagramm") or {})
+    titel = str(arguments.get("titel") or "Analyse")[:120]
+    basis = {
+        "id": uuid4().hex[:12],
+        "titel_vorlage": titel,
+        "titel": titel,
+        "sql": sql,
+        "diagramm_basis": diagramm,
+        # Dropdowns ueber dem Diagramm (Jahr, Top-N, Kennzahl ...): Platzhalter im SQL + erlaubte Werte
+        "parameter": analysen.parameter_pruefen(arguments.get("parameter"), sql),
+    }
     try:
-        ergebnis = db.run_readonly_sql(sql, max_rows=ANALYSE_MAX_ZEILEN)
+        analyse = analysen.ausfuehren(basis)
     except db.SqlFehler as exc:
         logger.info("sql_analyse: SQL abgelehnt (%s): %s", exc, sql)
         return {"fehler": f"SQL-Fehler: {exc}. Bitte korrigieren und erneut aufrufen."}, None
-    spalten = ergebnis["spalten"]
-    # Unbekannte Achsen-Spalten nicht raten lassen: auf die ersten passenden Spalten zurueckfallen
-    if diagramm.get("typ") != "tabelle" and spalten:
-        if diagramm.get("x") not in spalten:
-            diagramm["x"] = spalten[0]
-        if diagramm.get("y") not in spalten:
-            diagramm["y"] = spalten[-1]
-    analyse = {
-        "id": uuid4().hex[:12],
-        "titel": str(arguments.get("titel") or "Analyse")[:120],
-        "sql": sql,
-        "spalten": spalten,
-        "zeilen": ergebnis["zeilen"],
-        "anzahl": ergebnis["anzahl"],
-        "abgeschnitten": ergebnis["abgeschnitten"],
-        "diagramm": diagramm,
-    }
     an_modell = {
-        "spalten": spalten,
-        "zeilen": ergebnis["zeilen"][:ANALYSE_MODELL_ZEILEN],
-        "anzahl": ergebnis["anzahl"],
-        "abgeschnitten": ergebnis["abgeschnitten"] or ergebnis["anzahl"] > ANALYSE_MODELL_ZEILEN,
-        "hinweis": "Diagramm und SQL werden im Tab 'Analyse' angezeigt.",
+        "spalten": analyse["spalten"],
+        "zeilen": analyse["zeilen"][:ANALYSE_MODELL_ZEILEN],
+        "anzahl": analyse["anzahl"],
+        "abgeschnitten": analyse["abgeschnitten"] or analyse["anzahl"] > ANALYSE_MODELL_ZEILEN,
+        "aktuelle_auswahl": analyse.get("werte") or {},
+        "hinweis": "Diagramm (mit Auswahlfeldern) wird im Tab 'Analyse' angezeigt. Beziehe dich auf die aktuelle Auswahl.",
     }
     return an_modell, analyse
 

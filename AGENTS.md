@@ -214,6 +214,10 @@ Er schreibt nur in Obsidian (+ Protokollzeile in `obsidian_eintrag`), **nie** in
 Antworten des Copilots sind **Markdown** (Frontend: `MessageMarkdown.tsx`, react-markdown + GFM-Tabellen). Links nur als
 `[Text](url)` und nur mit URLs aus Tool-Feldern (`links`, `uri`, `akte_link`); erlaubte Protokolle: http(s), mailto, tel, obsidian.
 Formatregeln stehen in `SYSTEM_INSTRUCTIONS` (`backend/openai_copilot.py`).
+**Analyse-Auswahlfelder:** Das Werkzeug `sql_analyse` nimmt benannte SQL-Platzhalter (`:jahr`, `:limit`, `:kennzahl`) samt
+erlaubter Werte (`parameter`); daraus werden Dropdowns über dem Diagramm. `POST /api/chat/analysen/{id}/neu-berechnen`
+`{"werte": {...}}` rechnet ohne KI neu (`backend/analysen.py`: nur Whitelist-Werte, als Bind-Parameter, read-only); der
+aktuelle Stand liegt in `chat_analyse`. Liefert das SQL `vermittler_nr` mit, öffnet ein Klick auf Balken/Zeile die Partnerakte.
 Vermittlernamen werden nach der Antwort **im Backend** verlinkt (`backend/vermittler_links.py`): jeder volle Name aus der DB
 wird zu `[Name](partner:<nr>)`, ein Klick öffnet die Partnerakte. Doppelte Namen nur, wenn genau einer davon in den
 Werkzeug-Ergebnissen der Antwort vorkam; vorhandene Links, Code und URLs bleiben unangetastet.
