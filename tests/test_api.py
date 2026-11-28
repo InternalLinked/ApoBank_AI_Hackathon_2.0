@@ -651,6 +651,92 @@ def test_excel_export_partnerakte(client):
     assert client.get("/api/vermittler/999999/export.xlsx").status_code == 404
 
 
+def _docx(text: str) -> bytes:
+    import io
+    import zipfile
+    puffer = io.BytesIO()
+    with zipfile.ZipFile(puffer, "w") as zf:
+        zf.writestr("word/document.xml", '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                    f"<w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body></w:document>")
+    return puffer.getvalue()
+
+
+def _xlsx_bytes() -> bytes:
+    import io
+    wb = openpyxl.Workbook()
+    wb.active.append(["Vermittler", "Volumen"])
+    wb.active.append(["Weber", 1200000])
+    puffer = io.BytesIO()
+    wb.save(puffer)
+    return puffer.getvalue()
+
+
+PNG_1PX = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+                        "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082")
+
+
+def test_anhaenge_hochladen_und_pruefen(client):
+    chat_id = client.post("/api/chat/conversations", json={"titel": "t"}, headers=BROWSER_A).json()["id"]
+    url = f"/api/chat/conversations/{chat_id}/anhaenge"
+    for name, daten, art, enthaelt in [
+        ("protokoll.txt", "Gespräch mit Weber: Praxisgründung 2027".encode("utf-8"), "text", "Praxisgründung"),
+        ("protokoll.docx", _docx("Konditionen schicken bis Freitag"), "text", "Konditionen schicken"),
+        ("zahlen.xlsx", _xlsx_bytes(), "text", "Weber;1200000"),
+        ("notiz.png", PNG_1PX, "bild", None),
+    ]:
+        r = client.post(url, files={"datei": (name, daten)}, headers=BROWSER_A)
+        assert r.status_code == 201, (name, r.text)
+        assert r.json()["art"] == art and r.json()["name"] == name
+    text = client.post("/api/sql/query", json={"sql": "SELECT text FROM chat_anhang WHERE name = 'zahlen.xlsx'"}).json()
+    assert "Weber;1200000" in text["zeilen"][0][0]
+
+    # Abgelehnt: falscher Typ, leer, fremder Browser
+    assert client.post(url, files={"datei": ("virus.exe", b"MZ")}, headers=BROWSER_A).json()["fehler_code"] == "ANHANG_TYP"
+    assert client.post(url, files={"datei": ("leer.txt", b"")}, headers=BROWSER_A).json()["fehler_code"] == "ANHANG_LEER"
+    assert client.post(url, files={"datei": ("a.txt", b"x")}, headers=BROWSER_B).status_code == 404
+    # Unbekannte Anhang-ID beim Senden -> 404, nichts wird still ignoriert
+    r = client.post(f"/api/chat/conversations/{chat_id}/messages", json={"inhalt": "x", "anhaenge": ["gibtsnicht"]},
+                    headers=BROWSER_A)
+    assert r.status_code == 404
+
+
+class _FakeAnhangOpenAI(_FakeOpenAI):
+    gesehen: list = []
+
+    def create(self, model, instructions, tools, input, **_):
+        if instructions == SYSTEM_INSTRUCTIONS_REF[0]:
+            _FakeAnhangOpenAI.gesehen.append(input[-1])
+        return _FakeResponse(text="Zusammenfassung: Weber plant eine Praxisgründung.")
+
+
+SYSTEM_INSTRUCTIONS_REF: list = []
+
+
+def test_anhang_geht_mit_der_nachricht_an_die_ki(client, monkeypatch):
+    import openai
+
+    from backend import openai_copilot
+    SYSTEM_INSTRUCTIONS_REF[:] = [openai_copilot.SYSTEM_INSTRUCTIONS]
+    _FakeAnhangOpenAI.gesehen = []
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    monkeypatch.setattr(openai, "OpenAI", _FakeAnhangOpenAI)
+    chat_id = client.post("/api/chat/conversations", json={"titel": "t"}, headers=BROWSER_A).json()["id"]
+    url = f"/api/chat/conversations/{chat_id}/anhaenge"
+    text_id = client.post(url, files={"datei": ("p.txt", "Weber plant Praxisgründung".encode())}, headers=BROWSER_A).json()["id"]
+    bild_id = client.post(url, files={"datei": ("n.png", PNG_1PX)}, headers=BROWSER_A).json()["id"]
+
+    r = client.post(f"/api/chat/conversations/{chat_id}/messages",
+                    json={"inhalt": "Fasse zusammen", "anhaenge": [text_id, bild_id]}, headers=BROWSER_A)
+    assert r.status_code == 200, r.text
+    [letzte] = _FakeAnhangOpenAI.gesehen
+    teile = letzte["content"]
+    assert teile[0]["type"] == "input_text" and "Weber plant Praxisgründung" in teile[0]["text"]
+    assert teile[1]["type"] == "input_image" and teile[1]["image_url"].startswith("data:image/png;base64,")
+    # Anhaenge stehen in der gespeicherten Nutzernachricht (fuer die Anzeige als Chip)
+    verlauf = client.get("/api/chat/workspace", headers=BROWSER_A).json()["messages_by_conversation"][chat_id]
+    assert [a["name"] for a in verlauf[0]["metadata"]["anhaenge"]] == ["p.txt", "n.png"]
+
+
 def test_copilot_speichert_nichts_bei_unbekanntem_vermittler(client):
     from backend import db, openai_copilot
     conn = db.connect()

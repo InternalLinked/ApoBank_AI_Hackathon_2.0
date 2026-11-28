@@ -8,6 +8,14 @@ import { VoiceButton } from "./VoiceButton";
 
 type PaneTab = "chat" | "analyse" | "aenderungen";
 
+/** Anhänge im Chat (siehe backend/anhaenge.py) */
+const ATTACHMENT_ACCEPT = ".pdf,.docx,.xlsx,.txt,.md,.csv,.json,.eml,.png,.jpg,.jpeg,.webp,.gif";
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+function formatSize(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toLocaleString("de-DE", { maximumFractionDigits: 1 })} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 /** Stufen der automatischen Modellwahl (backend/modellwahl.py) */
 const TIER_LABEL: Record<string, string> = { smalltalk: "schnell", analyse: "Analyse", aendern: "Änderung", standard: "Standard" };
 
@@ -26,7 +34,8 @@ type ConversationPaneProps = {
   partner: PartnerSummary | null;
   aiConfigured: boolean;
   isSending: boolean;
-  onSend: (content: string, startSuggestion?: StartSuggestion) => void;
+  /** false = nicht gesendet (z. B. Anhang abgelehnt) – dann bleiben Text und Datei im Eingabefeld */
+  onSend: (content: string, startSuggestion?: StartSuggestion, file?: File | null) => Promise<boolean> | void;
   onOpenChats: () => void;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
@@ -51,6 +60,8 @@ type ConversationPaneProps = {
 export function ConversationPane({ conversation, messages, partner, aiConfigured, isSending, onSend, onOpenChats, sidebarCollapsed, onToggleSidebar, onOpenDetails, inspectorCollapsed, onExpandInspector, onToggleInspector, onSelectCandidate, onOpenPartner, onTranscribe, onError, onConfirmProposal, onRejectProposal, onExportAnalysis }: ConversationPaneProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachment, setAttachment] = useState<File | null>(null);
 
   // Diktierten Text anhängen (nicht ersetzen) und zum Prüfen ins Feld fokussieren – gesendet wird erst per Klick/Enter
   function insertTranscript(text: string) {
@@ -101,12 +112,29 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
     setTab("analyse");
   }
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const message = value.trim();
+    const typed = value.trim();
+    const file = attachment;
+    const message = typed || (file ? "Bitte sieh dir den Anhang an und fasse ihn zusammen." : "");
     if (!message || isSending) return;
-    onSend(message);
     setValue("");
+    setAttachment(null);
+    const sent = await onSend(message, undefined, file);
+    if (sent === false) {   // z. B. Anhang abgelehnt: Eingabe und Datei wiederherstellen
+      setValue(typed);
+      setAttachment(file);
+    }
+  }
+
+  function pickFile(file: File | null) {
+    if (!file) return;
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      onError(`„${file.name}“ ist zu groß (max. 10 MB).`);
+      return;
+    }
+    setAttachment(file);
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -185,6 +213,17 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
                 </div>
                 <div className={`message-card ${message.role === "user" ? "user-message-card" : "assistant-message-card"}`}>
                   {message.role === "assistant" ? <MessageMarkdown content={message.content} onOpenPartner={onOpenPartner} /> : <p>{message.content}</p>}
+                  {message.attachments && (
+                    <ul className="message-attachments" aria-label="Anhänge">
+                      {message.attachments.map((attachment) => (
+                        <li key={attachment.id} title={attachment.hint ?? attachment.name}>
+                          <Icon name={attachment.kind === "bild" ? "upload" : "file"} size={13} />
+                          <span>{attachment.name}</span>
+                          {attachment.size > 0 && <small>{formatSize(attachment.size)}</small>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   {message.metrics && <div className="metric-grid">{message.metrics.map((metric) => <div className={`metric-card tone-${metric.tone ?? "green"}`} key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.detail}</small></div>)}</div>}
                   {message.bullets && <ul className="message-bullets">{message.bullets.map((bullet) => <li key={bullet}><span className="bullet-dot" />{bullet}</li>)}</ul>}
                   {message.candidates && (
@@ -242,8 +281,25 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
       <div className="composer-wrap">
         <div className="quick-prompts"><span>Vorschläge</span><button type="button" onClick={() => onSend("Welche Punkte sollte ich im Gespräch ansprechen?")}>Gespräch vorbereiten</button><button type="button" onClick={() => onSend("Zeig mir offene Vorgänge")}>Offene Vorgänge</button><button type="button" disabled={isSending} onClick={() => onSend(STARTER_PROMPTS[0].prompt, "top10")}>Meine Top 10</button></div>
         <form className="composer" onSubmit={submit}>
-          <textarea ref={textareaRef} rows={1} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={handleKeyDown} placeholder="Frage zur Partnerakte oder schreibe eine Notiz … (oder Mikrofon nutzen)" aria-label="Nachricht an Aipo" />
-          <div className="composer-footer"><span><Icon name="sparkle" size={14} /> Antworten mit Quellenbezug</span><div className="composer-actions"><button type="button" className="composer-attach" aria-label="Datei anhängen" title="Datei anhängen"><Icon name="file" size={17} /></button><VoiceButton disabled={isSending} onTranscribe={onTranscribe} onText={insertTranscript} onError={onError} /><button type="submit" className="send-button" disabled={!value.trim() || isSending} aria-label="Nachricht senden"><Icon name="send" size={16} /></button></div></div>
+          {attachment && (
+            <div className="composer-attachment" role="status">
+              <Icon name="file" size={14} />
+              <span className="composer-attachment-name" title={attachment.name}>{attachment.name}</span>
+              <small>{formatSize(attachment.size)}</small>
+              <button type="button" onClick={() => setAttachment(null)} aria-label={`Anhang ${attachment.name} entfernen`} title="Anhang entfernen" disabled={isSending}><Icon name="close" size={13} /></button>
+            </div>
+          )}
+          <textarea ref={textareaRef} rows={1} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={handleKeyDown} placeholder={attachment ? "Was soll Aipo mit dem Anhang machen? (z. B. „Fasse das Protokoll zusammen“)" : "Frage zur Partnerakte oder schreibe eine Notiz … (oder Mikrofon nutzen)"} aria-label="Nachricht an Aipo" />
+          <div className="composer-footer">
+            <div className="composer-tools">
+              <input ref={fileInputRef} type="file" hidden accept={ATTACHMENT_ACCEPT} onChange={(event) => { pickFile(event.target.files?.[0] ?? null); event.target.value = ""; }} />
+              <button type="button" className="composer-upload" onClick={() => fileInputRef.current?.click()} disabled={isSending}
+                aria-label="Datei anhängen (PDF, Word, Excel, Text, Bild)" title="Datei anhängen – PDF, Word, Excel, Text oder Bild, max. 10 MB">
+                <Icon name="upload" size={16} /> <span>Datei anhängen</span>
+              </button>
+            </div>
+            <div className="composer-actions"><VoiceButton disabled={isSending} onTranscribe={onTranscribe} onText={insertTranscript} onError={onError} /><button type="submit" className="send-button" disabled={(!value.trim() && !attachment) || isSending} aria-label="Nachricht senden"><Icon name="send" size={16} /></button></div>
+          </div>
         </form>
         <p className="composer-note">Angaben aus dem Chat erst prüfen und anschließend bewusst in die Partnerakte übernehmen.</p>
       </div>

@@ -24,7 +24,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import aenderungen, db, excel_export, obsidian, openai_copilot, transcribe, vermittler_links
+from . import aenderungen, anhaenge, db, excel_export, obsidian, openai_copilot, transcribe, vermittler_links
 from .config import settings
 from .schemas import (ChatKonversationCreate, ChatNachrichtIn, EintragIn, ExportTabelleIn, GeschaeftszahlIn, ProfilFaktIn,
                       SqlQueryIn, VermittlerCreate, VermittlerUpdate, ZusammenfassungIn)
@@ -753,6 +753,63 @@ def delete_chat_conversation(conversation_id: str, client: str = Depends(client_
     return Response(status_code=204)
 
 
+@app.exception_handler(anhaenge.AnhangFehler)
+def _anhang_fehler(request: Request, exc: anhaenge.AnhangFehler) -> JSONResponse:
+    return _fehler_json(request, exc.status, exc.meldung, exc.code)
+
+
+def _anhang_kurz(a: dict[str, Any]) -> dict[str, Any]:
+    return {"id": a["id"], "name": a["name"], "art": a["art"], "groesse": a["groesse"], "mime": a["mime"]}
+
+
+def _anhaenge_laden(conn: Conn, conversation_id: str, client: str, ids: list[str]) -> list[dict[str, Any]]:
+    """Nur eigene Anhaenge dieses Chats; unbekannte IDs -> 404 (nichts wird still ignoriert)."""
+    if not ids:
+        return []
+    ids = list(dict.fromkeys(ids))
+    rows = conn.execute(
+        f"SELECT * FROM chat_anhang WHERE konversation_id = ? AND client_id = ? AND id IN ({','.join('?' * len(ids))})",
+        [conversation_id, client, *ids]).fetchall()
+    gefunden = {r["id"]: dict(r) for r in rows}
+    if len(gefunden) != len(ids):
+        raise HTTPException(404, "Anhang nicht gefunden – bitte erneut hochladen.")
+    return [gefunden[i] for i in ids]
+
+
+def _mit_frueheren_anhaengen(conn: Conn, row: sqlite3.Row) -> str:
+    """Fruehere Nachrichten mit Anhang: Text der Anhaenge mitgeben, damit Rueckfragen dazu funktionieren."""
+    meta = _decode_metadata(row["metadaten_json"]) if row["rolle"] == "user" else {}
+    ids = [a["id"] for a in meta.get("anhaenge") or []]
+    if not ids:
+        return row["inhalt"]
+    rows = conn.execute(f"SELECT name, art, text FROM chat_anhang WHERE id IN ({','.join('?' * len(ids))})", ids).fetchall()
+    teile = [row["inhalt"]] + [
+        f"--- Anhang „{r['name']}“ ---\n{r['text'] if r['art'] == 'text' else '(Bild, wurde in dieser Nachricht gezeigt)'}"
+        for r in rows]
+    return "\n\n".join(teile)
+
+
+@app.post("/api/chat/conversations/{conversation_id}/anhaenge", tags=["Chat"], status_code=201,
+          summary="Datei fuer die naechste Chat-Nachricht hochladen (PDF, Word, Excel, Text, Bild)")
+async def anhang_hochladen(conversation_id: str, datei: UploadFile = File(...), client: str = Depends(client_id),
+                           conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    """Liest den Inhalt aus und merkt ihn sich; mit der naechsten Nachricht (`anhaenge: [id]`) bekommt ihn die KI."""
+    _eigener_chat(conn, conversation_id, client)
+    daten = await datei.read(anhaenge.MAX_BYTES + 1)
+    name = Path(datei.filename or "anhang").name[:200]
+    ausgelesen = anhaenge.auslesen(name, daten)
+    anhang_id = uuid4().hex[:12]
+    conn.execute(
+        "INSERT INTO chat_anhang (id, konversation_id, client_id, name, mime, groesse, art, text, bild_base64, abgeschnitten) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (anhang_id, conversation_id, client, name, ausgelesen.mime, len(daten), ausgelesen.art, ausgelesen.text,
+         ausgelesen.bild_base64, int(ausgelesen.abgeschnitten)))
+    logger.info("Anhang %s hochgeladen: %s (%s, %d Bytes, %s)", anhang_id, name, ausgelesen.art, len(daten),
+                f"{len(ausgelesen.text or '')} Zeichen" if ausgelesen.art == "text" else "Bild")
+    return {"id": anhang_id, "name": name, "art": ausgelesen.art, "groesse": len(daten), "mime": ausgelesen.mime,
+            "zeichen": len(ausgelesen.text or ""), "abgeschnitten": ausgelesen.abgeschnitten, "hinweis": ausgelesen.hinweis}
+
+
 @app.post("/api/chat/conversations/{conversation_id}/messages", tags=["Chat"],
           summary="Nachricht speichern und ueber OpenAI mit Datenwerkzeugen beantworten")
 def send_chat_message(conversation_id: str, body: ChatNachrichtIn, request: Request, client: str = Depends(client_id),
@@ -760,15 +817,19 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, request: Requ
     conversation = _eigener_chat(conn, conversation_id, client)
 
     content = body.inhalt.strip()
+    anhaenge_jetzt = _anhaenge_laden(conn, conversation_id, client, body.anhaenge)
+    user_meta = {"anhaenge": [_anhang_kurz(a) for a in anhaenge_jetzt]} if anhaenge_jetzt else None
     conn.execute(
-        "INSERT INTO chat_nachricht (konversation_id, rolle, inhalt) VALUES (?, 'user', ?)",
-        (conversation_id, content),
+        "INSERT INTO chat_nachricht (konversation_id, rolle, inhalt, metadaten_json) VALUES (?, 'user', ?, ?)",
+        (conversation_id, content, json.dumps(user_meta, ensure_ascii=False) if user_meta else None),
     )
     history_rows = conn.execute(
-        "SELECT rolle, inhalt FROM chat_nachricht WHERE konversation_id = ? ORDER BY id DESC LIMIT 16",
+        "SELECT rolle, inhalt, metadaten_json FROM chat_nachricht WHERE konversation_id = ? ORDER BY id DESC LIMIT 16",
         (conversation_id,),
     ).fetchall()
-    history = [{"role": row["rolle"], "content": row["inhalt"]} for row in reversed(history_rows)]
+    history = [{"role": row["rolle"], "content": _mit_frueheren_anhaengen(conn, row)} for row in reversed(history_rows)]
+    if anhaenge_jetzt:
+        history[-1]["content"] = content  # aktuelle Anhaenge (inkl. Bilder) gibt antwort_auf_nachricht selbst mit
     if body.startvorschlag:
         vorbereitet = request.app.state.startvorschlaege[body.startvorschlag]
         reply = openai_copilot.CopilotReply(
@@ -776,7 +837,7 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, request: Requ
             analysen=[{**analyse, "id": uuid4().hex[:12]} for analyse in vorbereitet.analysen],
         )
     else:
-        reply = openai_copilot.antwort_auf_nachricht(conn, history)
+        reply = openai_copilot.antwort_auf_nachricht(conn, history, anhaenge=anhaenge_jetzt)
     # Vermittlernamen klickbar machen ([Name](partner:<nr>) -> Frontend oeffnet die Partnerakte)
     reply.content = vermittler_links.verlinke(
         conn, reply.content, [*reply.erwaehnte_nrs, reply.vermittler_nr, *(k.get("vermittler_nr") for k in reply.kandidaten)])

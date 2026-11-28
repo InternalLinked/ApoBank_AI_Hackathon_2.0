@@ -9,5 +9,7 @@ python-dotenv>=1.0
 pytest>=8
 # KI-Copilot (backend/copilot): Amazon Bedrock; ohne Bedrock (LLM_PROVIDER=fake) nicht erforderlich
 boto3>=1.40
+# Anhaenge im Chat: Text aus PDFs lesen (reines Python, ohne Systemabhaengigkeiten)
+pypdf>=5.0
 # Mikrofon im Chat: Amazon Transcribe Streaming (HTTP/2, bringt awscrt mit)
 amazon-transcribe>=0.6.2

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createWorkspaceApi, errorMessage } from "@/lib/workspace-api";
-import type { Analysis, ChangeProposal, ChatMessage, ExtractedFinding, ManualEntryInput, PartnerCandidate, PartnerDetail, PartnerSummary, StartSuggestion, WorkspaceApi, WorkspaceSnapshot } from "@/lib/workspace-contracts";
+import type { Analysis, ChangeProposal, ChatAttachment, ChatMessage, ExtractedFinding, ManualEntryInput, PartnerCandidate, PartnerDetail, PartnerSummary, StartSuggestion, WorkspaceApi, WorkspaceSnapshot } from "@/lib/workspace-contracts";
 import { ChatSidebar } from "./ChatSidebar";
 import { ConversationPane } from "./ConversationPane";
 import { InspectorPanel } from "./InspectorPanel";
@@ -27,8 +27,8 @@ export function Workspace() {
   const [toast, setToast] = useState("");
   const [partnerDetail, setPartnerDetail] = useState<PartnerDetail | null>(null);
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
-  // Rechte Leiste ist standardmäßig eingefahren und öffnet sich nie automatisch (auch nicht, wenn der Copilot
-  // einen Vermittler findet) – nur per Klick auf einen Namen, einen Auswahl-Button oder den Knopf oben rechts.
+  // Rechte Leiste ist standardmäßig eingefahren und öffnet sich nie automatisch (auch nicht, wenn der Copilot
+  // einen Vermittler findet) – nur per Klick auf einen Namen, einen Auswahl-Button oder den Knopf oben rechts.
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const partnerRequest = useRef(0);
@@ -135,8 +135,9 @@ export function Workspace() {
     }));
   }
 
-  async function sendMessage(content: string, startSuggestion?: StartSuggestion) {
-    if (isSending) return;
+  /** Liefert false, wenn nicht gesendet wurde (z. B. Anhang abgelehnt) – dann behält das Eingabefeld Text und Datei. */
+  async function sendMessage(content: string, startSuggestion?: StartSuggestion, file?: File | null): Promise<boolean> {
+    if (isSending) return false;
     let conversationId = activeConversationId;
     if (!conversationId) {
       const conversation = await api.createConversation();
@@ -144,7 +145,20 @@ export function Workspace() {
       setActiveConversationId(conversationId);
       setSnapshot((current) => ({ ...current, conversations: [conversation, ...current.conversations], messagesByConversation: { ...current.messagesByConversation, [conversationId]: [] } }));
     }
-    const userMessage: ChatMessage = { id: `user-${Date.now()}`, role: "user", content, createdAt: "Jetzt" };
+    // Anhang zuerst hochladen: Wird die Datei abgelehnt (Typ, Größe, unlesbar), geht die Nachricht gar nicht erst raus
+    let attachments: ChatAttachment[] = [];
+    if (file) {
+      setIsSending(true);
+      try {
+        attachments = [await api.uploadAttachment(conversationId, file)];
+        if (attachments[0].hint) setToast(attachments[0].hint);
+      } catch (error) {
+        setToast(errorMessage(error, "Der Anhang konnte nicht hochgeladen werden."));
+        setIsSending(false);
+        return false;
+      }
+    }
+    const userMessage: ChatMessage = { id: `user-${Date.now()}`, role: "user", content, createdAt: "Jetzt", attachments: attachments.length ? attachments : undefined };
     addMessage(conversationId, userMessage);
     setSnapshot((current) => ({
       ...current,
@@ -152,7 +166,7 @@ export function Workspace() {
     }));
     setIsSending(true);
     try {
-      const request = api.sendMessage(conversationId, content, startSuggestion);
+      const request = api.sendMessage(conversationId, content, startSuggestion, attachments.map((attachment) => attachment.id));
       const reply = startSuggestion
         ? (await Promise.all([request, new Promise<void>((resolve) => window.setTimeout(resolve, 2000))]))[0]
         : await request;
@@ -170,6 +184,7 @@ export function Workspace() {
     } finally {
       setIsSending(false);
     }
+    return true;
   }
 
   async function createConversation() {
@@ -297,7 +312,7 @@ export function Workspace() {
     <div className={`workspace-shell ${inspectorCollapsed ? "inspector-collapsed" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       {mobileDrawer && <button className="mobile-backdrop" aria-label="Seitenleiste schließen" onClick={() => setMobileDrawer(null)} />}
       <ChatSidebar accountName={snapshot.accountName} conversations={snapshot.conversations} activeConversationId={activeConversationId} mobileOpen={mobileDrawer === "chats"} onCloseMobile={() => setMobileDrawer(null)} onSelect={selectConversation} onNewConversation={createConversation} onDelete={deleteConversation} />
-      <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)} onOpenDetails={openInspector} inspectorCollapsed={inspectorCollapsed} onExpandInspector={openInspector} onToggleInspector={() => (inspectorOpen ? hideInspector() : openInspector())} onSelectCandidate={selectCandidate} onOpenPartner={openPartnerFromLink} onTranscribe={transcribeAudio} onError={setToast} onConfirmProposal={confirmProposal} onRejectProposal={rejectProposal} onExportAnalysis={exportAnalysis} />
+      <ConversationPane conversation={activeConversation} messages={activeMessages} partner={snapshot.partner} aiConfigured={snapshot.aiConfigured} isSending={isSending} onSend={sendMessage} onOpenChats={() => setMobileDrawer("chats")} sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)} onOpenDetails={openInspector} inspectorCollapsed={inspectorCollapsed} onExpandInspector={openInspector} onToggleInspector={() => (inspectorOpen ? hideInspector() : openInspector())} onSelectCandidate={selectCandidate} onOpenPartner={openPartnerFromLink} onTranscribe={transcribeAudio} onError={setToast} onConfirmProposal={confirmProposal} onRejectProposal={rejectProposal} onExportAnalysis={exportAnalysis} />
       <InspectorPanel partner={snapshot.partner} partnerDetail={partnerDetail} findings={findings} mobileOpen={mobileDrawer === "details"} onCloseMobile={hideInspector} onSaveEntry={saveEntry} onConfirmFindings={confirmFindings} api={api} profileRefreshKey={profileRefreshKey} onError={setToast} onClosePartner={closePartner} />
       {toast && <div className="toast" role="status"><Icon name="check" size={16} />{toast}<button onClick={() => setToast("")} aria-label="Hinweis schließen"><Icon name="close" size={15} /></button></div>}
     </div>

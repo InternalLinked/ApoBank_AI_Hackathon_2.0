@@ -5,6 +5,7 @@ import type {
   ProposedChange,
   ChartType,
   ChartUnit,
+  ChatAttachment,
   ChatMessage,
   ChatReply,
   Conversation,
@@ -276,6 +277,18 @@ function toAnalysis(value: unknown, createdAt: string): Analysis | null {
   };
 }
 
+function toAttachment(value: unknown): ChatAttachment | null {
+  const item = record(value);
+  if (typeof item.id !== "string") return null;
+  return {
+    id: item.id,
+    name: String(item.name ?? "Anhang"),
+    kind: item.art === "bild" ? "bild" : "text",
+    size: typeof item.groesse === "number" ? item.groesse : 0,
+    hint: typeof item.hinweis === "string" && item.hinweis ? item.hinweis : undefined,
+  };
+}
+
 const CHANGE_KINDS: ProposedChange["kind"][] = ["stammdaten", "kontakt", "geschaeftszahlen", "profil_fakt_aendern", "profil_fakt_loeschen", "profil_fakt_neu", "notiz_neu"];
 
 function cellValue(value: unknown): string | number | null {
@@ -314,7 +327,11 @@ function toMessage(value: unknown): ChatMessage {
     ? metadata.aenderungsvorschlaege.map((proposal) => toProposal(proposal, createdAt)).filter((proposal): proposal is ChangeProposal => proposal !== null)
     : [];
   const model = record(metadata.modell);
+  const attachments = Array.isArray(metadata.anhaenge)
+    ? metadata.anhaenge.map(toAttachment).filter((attachment): attachment is ChatAttachment => attachment !== null)
+    : [];
   return {
+    attachments: attachments.length > 0 ? attachments : undefined,
     model: typeof model.modell === "string" ? {
       name: model.modell,
       tier: String(model.stufe ?? ""),
@@ -525,10 +542,18 @@ export function createWorkspaceApi(): WorkspaceApi {
       await request<void>(`/chat/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" });
     },
 
-    async sendMessage(conversationId: string, content: string, startSuggestion?: StartSuggestion): Promise<ChatReply> {
+    async uploadAttachment(conversationId: string, file: File): Promise<ChatAttachment> {
+      const form = new FormData();
+      form.set("datei", file, file.name);
+      const attachment = toAttachment(await request<unknown>(`/chat/conversations/${encodeURIComponent(conversationId)}/anhaenge`, { method: "POST", body: form }));
+      if (!attachment) throw new ApiError("Der Anhang konnte nicht verarbeitet werden.", null, "ANHANG_ANTWORT", "POST /chat/.../anhaenge");
+      return attachment;
+    },
+
+    async sendMessage(conversationId: string, content: string, startSuggestion?: StartSuggestion, attachmentIds?: string[]): Promise<ChatReply> {
       const data = record(await request<unknown>(`/chat/conversations/${conversationId}/messages`, {
         method: "POST",
-        body: JSON.stringify({ inhalt: content, startvorschlag: startSuggestion }),
+        body: JSON.stringify({ inhalt: content, startvorschlag: startSuggestion, anhaenge: attachmentIds ?? [] }),
       }));
       const message = toMessage(data.message);
       const fehler = record(data.fehler);

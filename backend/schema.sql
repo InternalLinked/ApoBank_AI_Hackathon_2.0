@@ -105,6 +105,22 @@ CREATE TABLE IF NOT EXISTS chat_nachricht (
     erstellt_am        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Anhaenge im Chat (PDF/Word/Excel/Text -> ausgelesener Text, Bilder -> base64). Gehen mit der naechsten
+-- Nachricht an die KI; gebunden an Chat + Browser-ID. Werden mit dem Chat geloescht.
+CREATE TABLE IF NOT EXISTS chat_anhang (
+    id                 TEXT PRIMARY KEY,
+    konversation_id    TEXT NOT NULL REFERENCES chat_konversation(id) ON DELETE CASCADE,
+    client_id          TEXT,
+    name               TEXT NOT NULL,
+    mime               TEXT NOT NULL,
+    groesse            INTEGER NOT NULL,
+    art                TEXT NOT NULL CHECK (art IN ('text', 'bild')),
+    text               TEXT,
+    bild_base64        TEXT,
+    abgeschnitten      INTEGER NOT NULL DEFAULT 0,
+    erstellt_am        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Aenderungsvorschlaege der KI (Stammdaten, Kontakt, Geschaeftszahlen, Profil). Werden erst nach
 -- Klick auf "Bestaetigen" im Tab "Aenderungen" ausgefuehrt; gebunden an Chat + Browser-ID.
 CREATE TABLE IF NOT EXISTS chat_aenderung (

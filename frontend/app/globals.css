@@ -278,6 +278,22 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 .composer-footer > span { display: flex; align-items: center; gap: 5px; color: #90a19d; font-size: 11px; }
 .composer-footer > span svg { color: #41977d; }
 .composer-actions { display: flex; align-items: center; gap: 7px; }
+/* Anhang im Chat: Button links unten, Chip ueber dem Textfeld, Chips in der gesendeten Nachricht */
+.composer-tools { display: flex; align-items: center; gap: 6px; }
+.composer-upload { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 8px; border: 1px solid #dce4ef; border-radius: 8px; color: #4f6177; background: #fff; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: border-color .15s ease, color .15s ease, background .15s ease; }
+.composer-upload:hover:not(:disabled) { border-color: var(--sidebar); color: var(--sidebar); background: #eef3fb; }
+.composer-upload:disabled { cursor: default; opacity: .6; }
+.composer-upload:focus-visible { outline: 2px solid #8fb3ff; outline-offset: 1px; }
+.composer-attachment { display: inline-flex; max-width: 100%; align-items: center; gap: 7px; margin: 0 0 7px; padding: 5px 6px 5px 9px; border: 1px solid #d9e4f5; border-radius: 9px; color: var(--sidebar); background: #eef3fb; font-size: 11.5px; }
+.composer-attachment-name { overflow: hidden; max-width: 340px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.composer-attachment small { color: #6b7a88; font-size: 10px; }
+.composer-attachment button { display: grid; place-items: center; width: 20px; height: 20px; border: 0; border-radius: 5px; color: #6b7a88; background: transparent; cursor: pointer; }
+.composer-attachment button:hover:not(:disabled) { color: #9b3a2c; background: #fdf0ed; }
+.message-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
+.message-attachments li { display: inline-flex; max-width: 100%; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid #cfdcef; border-radius: 7px; color: var(--sidebar); background: #fff; font-size: 11px; }
+.message-attachments span { overflow: hidden; max-width: 260px; text-overflow: ellipsis; white-space: nowrap; }
+.message-attachments small { color: #8c9a9b; font-size: 9.5px; }
+@media (max-width: 640px) { .composer-upload span { display: none; } .composer-upload { padding: 0 8px; } }
 .composer-attach { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 8px; color: #879692; background: transparent; }
 .composer-attach:hover { color: #2a806a; background: #f0f7f3; }
 /* Mikrofon (Amazon Transcribe): Ruhezustand wie die anderen Icons, Aufnahme rot mit Timer */

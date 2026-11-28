@@ -13,7 +13,20 @@ export type MessageMetric = {
   tone?: "green" | "amber" | "blue";
 };
 
+/** Datei, die mit einer Nachricht an Aipo ging (Inhalt hat die KI bekommen) */
+export type ChatAttachment = {
+  id: string;
+  name: string;
+  /** "text" = ausgelesen (PDF, Word, Excel, Text), "bild" = als Bild an die KI */
+  kind: "text" | "bild";
+  size: number;
+  /** z. B. „PDF enthält keinen Text (Scan?)“ */
+  hint?: string;
+};
+
 export type ChatMessage = {
+  /** Anhänge einer Nutzernachricht */
+  attachments?: ChatAttachment[];
   id: string;
   role: "assistant" | "user";
   content: string;
@@ -218,7 +231,9 @@ export interface WorkspaceApi {
   transcribe(pcm: Blob, sampleRate: number, language?: string): Promise<Transcription>;
   createConversation(): Promise<Conversation>;
   deleteConversation(conversationId: string): Promise<void>;
-  sendMessage(conversationId: string, content: string, startSuggestion?: StartSuggestion): Promise<ChatReply>;
+  sendMessage(conversationId: string, content: string, startSuggestion?: StartSuggestion, attachmentIds?: string[]): Promise<ChatReply>;
+  /** Datei für die nächste Nachricht hochladen; das Backend liest den Inhalt aus */
+  uploadAttachment(conversationId: string, file: File): Promise<ChatAttachment>;
   getPartnerDetail(vermittlerNr: number): Promise<PartnerDetail>;
   createEntry(input: ManualEntryInput): Promise<SavedEntry>;
   confirmFindings(conversationId: string, partner: PartnerSummary, findings: ExtractedFinding[]): Promise<void>;
