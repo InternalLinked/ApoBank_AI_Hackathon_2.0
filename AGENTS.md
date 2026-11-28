@@ -187,6 +187,7 @@ while offset is not None:
 | `GET /api/analytics/ueberblick` | `?marktgebiet=Süd` – Summen je Jahr, Verteilungen |
 
 `gruppe` ∈ `vermittler | filiale | marktgebiet | betreuer | vermittlertyp | status_vertriebspartner | abrechnungskreis`.
+Filter: `marktgebiet`, `filial_nr`, `mitarbeiter_id`, `status`.
 
 ### Berater-Dashboard (POC, ohne Login)
 | Methode | Pfad | Zweck |
@@ -198,7 +199,6 @@ Berater = Betreuer aus der Excel (`betreuer` / `vermittler.mitarbeiter_id`), fes
 `APOBANK_BETREUERKONTO_ID` (Standard `MGK76244` = Hartmann, 26 Vermittler). Alle Dashboard-SQLs (`backend/dashboard.py`)
 binden das Konto als `:konto` über `feste_werte` – es ist nicht wählbar, jedes Diagramm zeigt nur eigene Vermittler.
 Frontend: Knopf „Dashboard“ oben in der linken Leiste → `DashboardView.tsx` in der Mitte (nutzt `AnalysisCard`).
-Filter: `marktgebiet`, `filial_nr`, `mitarbeiter_id`, `status`.
 
 ### Obsidian-Gehirn
 | Methode | Pfad | Zweck |
