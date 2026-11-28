@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+import time
 import unicodedata
 from datetime import date, datetime
 from pathlib import Path
@@ -280,7 +282,7 @@ def sync_hub(v: dict[str, Any]) -> dict[str, str]:
         abschnitt = f"## Persönliches Profil\n{_block('profil', _profil_link_md(nr))}\n\n"
         text = text.replace(anker, abschnitt + anker, 1) if anker in text else text
     text = _replace_block(text, "profil", _profil_link_md(nr))
-    path.write_text(text, encoding="utf-8")
+    _schreiben(path, text)
     ensure_profil(v)
     return reference(nr)
 
@@ -371,7 +373,7 @@ def ensure_profil(v: dict[str, Any]) -> str:
              "Eine Info pro Zeile als `- Text · JJJJ-MM-TT`. Darf frei in Obsidian bearbeitet werden.", ""]
     for label in PROFIL_KATEGORIEN.values():
         parts += [f"## {label}", ""]
-    path.write_text("\n".join(parts), encoding="utf-8")
+    _schreiben(path, "\n".join(parts))
     sync_interessen(v)
     return rel
 
@@ -394,7 +396,7 @@ def _zeilen_einfuegen(path: Path, kategorie: str, neue: list[str]) -> None:
     ende = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
     letzte = max((i for i in range(start + 1, ende) if lines[i].startswith("- ")), default=start)
     lines[letzte + 1:letzte + 1] = neue
-    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    _schreiben(path, "\n".join(lines).rstrip() + "\n")
 
 
 def sync_interessen(v: dict[str, Any]) -> int:
@@ -484,7 +486,7 @@ def delete_profil_fakt(vermittler_nr: int, fakt_id: str) -> bool:
         m = _PROFIL_ZEILE_RE.match(zeile.rstrip())
         if kategorie and m and _fakt_id(kategorie, m.group("text").strip()) == fakt_id:
             del lines[i]
-            path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+            _schreiben(path, "\n".join(lines).rstrip() + "\n")
             return True
     return False
 
@@ -555,11 +557,11 @@ def add_entry(v: dict[str, Any], entry: dict[str, Any]) -> dict[str, Any]:
             if m.get("faellig_am"):
                 line += f" 📅 {m['faellig_am'].isoformat()}"
             parts.append(line)
-    path.write_text("\n".join(parts) + "\n", encoding="utf-8")
+    _schreiben(path, "\n".join(parts) + "\n")
 
     # Hub-Eintragsliste aktualisieren
     text = hub.read_text(encoding="utf-8")
-    hub.write_text(_replace_block(text, "eintraege", _eintraege_md(nr)), encoding="utf-8")
+    _schreiben(hub, _replace_block(text, "eintraege", _eintraege_md(nr)))
 
     return {"datei": rel, "uri": obsidian_uri(rel), "datum": datum.isoformat(), "typ": typ, "titel": titel}
 
@@ -614,7 +616,7 @@ def set_summary(vermittler_nr: int, text: str, quelle: str | None = None) -> Non
         raise FileNotFoundError(hub_rel(vermittler_nr))
     stand = f"_Stand: {datetime.now():%Y-%m-%d %H:%M}" + (f" · Quelle: {quelle}" if quelle else "") + "_"
     content = hub.read_text(encoding="utf-8")
-    hub.write_text(_replace_block(content, "zusammenfassung", f"{text.strip()}\n\n{stand}"), encoding="utf-8")
+    _schreiben(hub, _replace_block(content, "zusammenfassung", f"{text.strip()}\n\n{stand}"))
 
 
 def search(query: str, limit: int = 20, *, nur_eintraege: bool = False) -> list[dict[str, Any]]:
@@ -655,6 +657,122 @@ def _wikilinks(text: str) -> set[str]:
     return {m.group(1).strip() for m in _WIKILINK_RE.finditer(text)}
 
 
+class _LinkIndex:
+    """Welche Notiz verlinkt worauf – im Speicher, damit das Netz nicht bei jedem Aufruf den Vault liest.
+
+    Auf EFS kostet jede Datei Millisekunden: ~2.000 Notizen lesen = ~5 s pro Netz-Aufruf. Der Index wird einmal
+    aufgebaut, bei jedem Schreiben ueber dieses Modul (`_schreiben`) fuer die eine Datei nachgefuehrt und alle
+    `MAX_ALTER_S` im Hintergrund neu gelesen (fuer Aenderungen von aussen, z. B. direkt in Obsidian).
+    """
+    MAX_ALTER_S = 300
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._vault: Path | None = None
+        self._stand = 0.0
+        self._dateien: dict[str, str] = {}          # stem -> Pfad relativ zum Vault
+        self._links: dict[str, set[str]] = {}       # Pfad -> Namen der verlinkten Notizen
+        self._aufbau_laeuft = False
+        self._waehrend_aufbau: dict[str, str | None] = {}  # Schreibvorgaenge waehrend eines Neuaufbaus
+
+    @staticmethod
+    def _ziele(text: str) -> set[str]:
+        return {Path(link).name for link in _wikilinks(text)}
+
+    def _lesen(self, vault: Path) -> tuple[dict[str, str], dict[str, set[str]]]:
+        dateien: dict[str, str] = {}
+        links: dict[str, set[str]] = {}
+        for p in vault.rglob("*.md"):
+            if ".obsidian" in p.parts or ".trash" in p.parts:
+                continue
+            rel = p.relative_to(vault).as_posix()
+            dateien[p.stem] = rel
+            ziele = self._ziele(p.read_text(encoding="utf-8", errors="ignore"))
+            if ziele:
+                links[rel] = ziele
+        return dateien, links
+
+    def _aufbauen(self, vault: Path) -> None:
+        dateien, links = self._lesen(vault)
+        with self._lock:
+            if self._vault != vault:
+                self._aufbau_laeuft = False
+                return  # Vault wurde inzwischen gewechselt (Tests)
+            for rel, text in self._waehrend_aufbau.items():
+                self._eintragen(dateien, links, rel, text)
+            self._dateien, self._links, self._stand = dateien, links, time.monotonic()
+            self._waehrend_aufbau.clear()
+            self._aufbau_laeuft = False
+
+    def _eintragen(self, dateien: dict[str, str], links: dict[str, set[str]], rel: str, text: str | None) -> None:
+        stem = Path(rel).stem
+        if text is None:
+            links.pop(rel, None)
+            if dateien.get(stem) == rel:
+                dateien.pop(stem)
+            return
+        dateien[stem] = rel
+        ziele = self._ziele(text)
+        if ziele:
+            links[rel] = ziele
+        else:
+            links.pop(rel, None)
+
+    def stand(self) -> tuple[dict[str, str], dict[str, set[str]]]:
+        """Aktueller Index; baut beim ersten Aufruf (bzw. nach Vault-Wechsel) synchron auf, danach nur im Hintergrund."""
+        vault = Path(settings.vault_path).resolve()
+        with self._lock:
+            neu = self._vault != vault
+            if neu:
+                self._vault, self._stand, self._dateien, self._links = vault, 0.0, {}, {}
+                self._waehrend_aufbau.clear()
+                self._aufbau_laeuft = False
+            veraltet = time.monotonic() - self._stand > self.MAX_ALTER_S
+            starten = veraltet and not self._aufbau_laeuft
+            if starten:
+                self._aufbau_laeuft = True
+            erster = self._stand == 0.0
+        if starten and erster:
+            self._aufbauen(vault)
+        elif starten:
+            threading.Thread(target=self._aufbauen, args=(vault,), daemon=True, name="obsidian-linkindex").start()
+        elif erster:
+            # ein anderer Aufruf baut gerade erstmals auf: kurz warten statt mit leerem Index zu antworten
+            for _ in range(200):
+                time.sleep(0.05)
+                if self._stand:
+                    break
+        with self._lock:
+            return dict(self._dateien), {k: set(v) for k, v in self._links.items()}
+
+    def geschrieben(self, path: Path, text: str | None) -> None:
+        """Nach dem Schreiben (text) bzw. Loeschen (None) einer Datei den Index fuer genau diese Datei nachfuehren."""
+        with self._lock:
+            if self._vault is None:
+                return
+            try:
+                rel = path.resolve().relative_to(self._vault).as_posix()
+            except ValueError:
+                return
+            if self._aufbau_laeuft:
+                self._waehrend_aufbau[rel] = text
+            if self._stand:
+                self._eintragen(self._dateien, self._links, rel, text)
+
+    def vorwaermen(self) -> None:
+        """Beim Serverstart im Hintergrund aufbauen, damit schon das erste Netz schnell ist."""
+        threading.Thread(target=self.stand, daemon=True, name="obsidian-linkindex-start").start()
+
+
+link_index = _LinkIndex()
+
+
+def _schreiben(path: Path, text: str) -> None:
+    """Alle Schreibzugriffe auf den Vault laufen hierueber – haelt den Link-Index aktuell."""
+    path.write_text(text, encoding="utf-8")
+    link_index.geschrieben(path, text)
+
+
 def netz(v: dict[str, Any], max_eintraege: int = 15, max_fakten: int = 15) -> dict[str, Any]:
     """Lokaler Graph um einen Vermittler – wie die lokale Graph-Ansicht in Obsidian.
 
@@ -663,7 +781,6 @@ def netz(v: dict[str, Any], max_eintraege: int = 15, max_fakten: int = 15) -> di
     """
     nr = v["vermittler_nr"]
     name = note_name(nr)
-    vault = Path(settings.vault_path).resolve()
     nodes: dict[str, dict[str, Any]] = {}
     edges: list[dict[str, str]] = []
 
@@ -708,18 +825,18 @@ def netz(v: dict[str, Any], max_eintraege: int = 15, max_fakten: int = 15) -> di
         if p.exists():
             eigene_texte.append(p.read_text(encoding="utf-8"))
     ausgehend = set().union(*(_wikilinks(t) for t in eigene_texte)) if eigene_texte else set()
-    eigener_ordner = abs_path(folder_rel(nr))
-    dateien = {p.stem: p for p in vault.rglob("*.md") if ".obsidian" not in p.parts and ".trash" not in p.parts}
-    for stem, p in dateien.items():
-        if eigener_ordner in p.parents:
+    eigener_ordner = folder_rel(nr) + "/"
+    ausgehend_namen = {Path(a).name for a in ausgehend}
+    dateien, links = link_index.stand()  # statt jede Notiz im Vault zu lesen (EFS: ~5 s)
+    for stem, rel in dateien.items():
+        if rel.startswith(eigener_ordner):
             continue
-        rel = p.relative_to(vault).as_posix()
         typ = "vermittler-link" if re.fullmatch(r"VM-\d+", stem) else "notiz"
-        if stem in ausgehend or Path(stem).name in {Path(a).name for a in ausgehend}:
+        if stem in ausgehend or stem in ausgehend_namen:
             edge(hub, node(stem, stem, typ, rel, "verlinkt"))
             continue
-        text = p.read_text(encoding="utf-8", errors="ignore")
-        if f"[[{name}" in text:
+        # Backlink: [[VM-4251]], [[VM-4251 Profil]], [[VM-4251|Alias]] …
+        if any(ziel == name or ziel.startswith(f"{name} ") for ziel in links.get(rel, ())):
             # Backlink: Eintraege anderer Vermittler zeigen auf deren Hub
             m = re.match(r"Vermittler/(VM-\d+)/", rel)
             if m and m.group(1) != stem:

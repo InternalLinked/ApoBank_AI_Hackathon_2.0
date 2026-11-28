@@ -581,6 +581,19 @@ def test_obsidian_netz(client):
     assert client.get("/api/vermittler/999999/obsidian/netz").status_code == 404
 
 
+def test_obsidian_netz_backlinks_ueber_index(client):
+    """Netz liest den Vault nicht mehr pro Aufruf: neue Backlinks muessen trotzdem sofort erscheinen."""
+    andere = [i["vermittler_nr"] for i in client.get("/api/vermittler", params={"limit": 5}).json()["items"]
+              if i["vermittler_nr"] != 4251][:2]
+    vorher = {k["id"] for k in client.get("/api/vermittler/4251/obsidian/netz").json()["knoten"]}  # Index steht
+    assert f"VM-{andere[0]}" not in vorher
+    client.post(f"/api/vermittler/{andere[0]}/obsidian/eintraege", json={"titel": "Tipp", "inhalt": "Kennt [[VM-4251|Hans]]."})
+    client.post(f"/api/vermittler/{andere[1]}/obsidian/eintraege", json={"titel": "Ohne Bezug", "inhalt": "[[VM-42510]] ist jemand anderes."})
+    nachher = {k["id"]: k for k in client.get("/api/vermittler/4251/obsidian/netz").json()["knoten"]}
+    assert nachher[f"VM-{andere[0]}"]["detail"] == "erwähnt diesen Vermittler"
+    assert f"VM-{andere[1]}" not in nachher  # VM-42510 ist kein Link auf VM-4251
+
+
 def test_copilot_speichert_direkt_im_obsidian(client):
     from backend import db, openai_copilot
     conn = db.connect()

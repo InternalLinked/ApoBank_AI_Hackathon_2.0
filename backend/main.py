@@ -36,6 +36,7 @@ async def lifespan(app: FastAPI):
         konto, antworten = _startvorschlaege(conn)
     app.state.betreuerkonto = konto
     app.state.startvorschlaege = antworten
+    obsidian.link_index.vorwaermen()  # Backlinks fuers Obsidian-Netz im Hintergrund einlesen (EFS ist langsam)
     yield
 
 
