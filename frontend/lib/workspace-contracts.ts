@@ -217,6 +217,8 @@ export type ChatReply = {
   partner: PartnerSummary | null;
   findings: ExtractedFinding[];
   aiConfigured: boolean;
+  /** Titel des Chats nach dieser Antwort (beim ersten Austausch vom Titel-Bot der KI vergeben) */
+  title?: string;
   /** Gesetzt, wenn der Copilot einen Fehler gemeldet hat (z. B. „… (OPENAI_AUTH · HTTP 401)“). */
   error?: string;
 };

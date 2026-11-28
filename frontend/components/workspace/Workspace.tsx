@@ -193,7 +193,15 @@ export function Workspace() {
         ? (await Promise.all([request, new Promise<void>((resolve) => window.setTimeout(resolve, 2000))]))[0]
         : await request;
       addMessage(conversationId, reply.message);
-      setSnapshot((current) => ({ ...current, partner: reply.partner ?? current.partner, aiConfigured: reply.aiConfigured }));
+      setSnapshot((current) => ({
+        ...current,
+        partner: reply.partner ?? current.partner,
+        aiConfigured: reply.aiConfigured,
+        // Titel vom Titel-Bot ersetzt den vorläufigen (abgeschnittene erste Frage)
+        conversations: reply.title
+          ? current.conversations.map((conversation) => (conversation.id === conversationId ? { ...conversation, title: reply.title as string } : conversation))
+          : current.conversations,
+      }));
       if (reply.partner) void loadPartnerDetail(reply.partner);
       if (reply.findings.length > 0) {
         setFindings(reply.findings);

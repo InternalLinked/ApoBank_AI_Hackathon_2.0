@@ -309,10 +309,63 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "upload_path", tmp_path / "uploads")
     monkeypatch.setattr(settings, "openai_api_key", None)
     monkeypatch.setattr(settings, "betreuerkonto_id", "SEB45322")
+    from backend import chat_titel
+    monkeypatch.setattr(chat_titel, "_ki_titel", lambda frage: None)  # Titel-Bot nie echt aufrufen (Fakes zaehlen Aufrufe)
     import_excel.run(xlsx)
     from backend.main import app
     with TestClient(app) as c:
         yield c
+
+
+def test_titel_bot_vergibt_titel_parallel_und_traegt_spaet_nach(client, monkeypatch):
+    import threading
+    import time
+
+    from backend import chat_titel, openai_copilot
+
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    monkeypatch.setattr(openai_copilot, "antwort_auf_nachricht",
+                        lambda conn, history, anhaenge=None: openai_copilot.CopilotReply(content="Antwort", configured=True))
+    # schneller Bot: Titel kommt mit der Antwort
+    monkeypatch.setattr(chat_titel, "_ki_titel", lambda frage: chat_titel.bereinigen('Titel: „Top-Vermittler Süd 2025“.'))
+    chat_id = client.post("/api/chat/conversations", json={}, headers=BROWSER_A).json()["id"]
+    r = client.post(f"/api/chat/conversations/{chat_id}/messages", json={"inhalt": "wer sind die besten im süden 2025?"},
+                    headers=BROWSER_A).json()
+    assert r["titel"] == "Top-Vermittler Süd 2025"
+    # Folgenachricht: Titel bleibt, kein neuer Bot-Aufruf
+    monkeypatch.setattr(chat_titel, "_ki_titel", lambda frage: pytest.fail("nur der erste Austausch bekommt einen Titel"))
+    assert client.post(f"/api/chat/conversations/{chat_id}/messages", json={"inhalt": "und 2024?"},
+                       headers=BROWSER_A).json()["titel"] == "Top-Vermittler Süd 2025"
+
+    # langsamer Bot: Antwort wartet nicht, erst Ersatztitel, KI-Titel wird nachgetragen
+    freigabe = threading.Event()
+    monkeypatch.setattr(chat_titel, "_ki_titel",
+                        lambda frage: "Gespräch mit Dr. Hans Baumann" if freigabe.wait(5) else None)
+    neuer_chat_id = client.post("/api/chat/conversations", json={}, headers=BROWSER_A).json()["id"]
+    assert neuer_chat_id != chat_id
+    chat_id = neuer_chat_id
+    start = time.monotonic()
+    r = client.post(f"/api/chat/conversations/{chat_id}/messages", json={"inhalt": "ich rede heute mit Dr. Hans Baumann"},
+                    headers=BROWSER_A).json()
+    dauer = time.monotonic() - start
+    freigabe.set()
+    assert dauer < 3 and r["titel"] == "ich rede heute mit Dr. Hans Baumann"
+    for _ in range(40):
+        workspace = client.get("/api/chat/workspace", headers=BROWSER_A).json()
+        titel = {c["id"]: c["titel"] for c in workspace["conversations"]}.get(chat_id)
+        if titel == "Gespräch mit Dr. Hans Baumann":
+            break
+        time.sleep(0.1)
+    assert titel == "Gespräch mit Dr. Hans Baumann"
+
+
+def test_titel_bereinigen():
+    from backend import chat_titel
+
+    assert chat_titel.bereinigen("\n**Rückgang Filiale Köln**.\nzweite Zeile") == "Rückgang Filiale Köln"
+    assert chat_titel.bereinigen("  ") is None and chat_titel.bereinigen(None) is None
+    lang = chat_titel.bereinigen("Sehr ausführlicher Titel über viele verschiedene Themen und noch mehr")
+    assert len(lang) <= chat_titel.MAX_LAENGE and lang.endswith("…")
 
 
 

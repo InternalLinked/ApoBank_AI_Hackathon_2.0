@@ -588,6 +588,7 @@ export function createWorkspaceApi(): WorkspaceApi {
         partner: toPartner(data.partner),
         findings: findingsFrom(data.findings),
         aiConfigured: data.openai_configured === true,
+        title: typeof data.titel === "string" && data.titel ? data.titel : undefined,
       };
     },
 

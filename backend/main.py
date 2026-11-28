@@ -24,7 +24,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import aenderungen, analysen, anhaenge, db, excel_export, obsidian, openai_copilot, transcribe, vermittler_links
+from . import aenderungen, analysen, anhaenge, chat_titel, db, excel_export, obsidian, openai_copilot, transcribe, vermittler_links
 from .config import settings
 from .schemas import (AnalyseNeuIn, ChatKonversationCreate, ChatNachrichtIn, EintragIn, ExportTabelleIn, GeschaeftszahlIn, ProfilFaktIn,
                       SqlQueryIn, VermittlerCreate, VermittlerUpdate, ZusammenfassungIn)
@@ -909,6 +909,11 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, request: Requ
 
     content = body.inhalt.strip()
     anhaenge_jetzt = _anhaenge_laden(conn, conversation_id, client, body.anhaenge)
+    # Der Modellaufruf fuer den ersten Titel laeuft parallel zur Antwort.
+    neuer_chat = conversation["titel"] == chat_titel.STANDARD_TITEL and conn.execute(
+        "SELECT 1 FROM chat_nachricht WHERE konversation_id = ? LIMIT 1", (conversation_id,),
+    ).fetchone() is None
+    titel_future = chat_titel.starten(content) if neuer_chat else None
     user_meta = {"anhaenge": [_anhang_kurz(a) for a in anhaenge_jetzt]} if anhaenge_jetzt else None
     conn.execute(
         "INSERT INTO chat_nachricht (konversation_id, rolle, inhalt, metadaten_json) VALUES (?, 'user', ?, ?)",
@@ -963,18 +968,22 @@ def send_chat_message(conversation_id: str, body: ChatNachrichtIn, request: Requ
         "INSERT INTO chat_nachricht (konversation_id, rolle, inhalt, metadaten_json) VALUES (?, 'assistant', ?, ?)",
         (conversation_id, reply.content, json.dumps(metadata, ensure_ascii=False)),
     )
-    title = content[:60] + ("…" if len(content) > 60 else "") if conversation["titel"] == "Neue Unterhaltung" else conversation["titel"]
-    conn.execute(
-        "UPDATE chat_konversation SET titel = ?, vermittler_nr = COALESCE(?, vermittler_nr), aktualisiert_am = datetime('now') "
-        "WHERE id = ?",
-        (title, reply.vermittler_nr, conversation_id),
-    )
+    # Startvorschlaege werden im Frontend erst nach 2 s gezeigt.
+    ki_titel = chat_titel.abholen(titel_future, 2.0 if body.startvorschlag else chat_titel.WARTEN_S)
+    erster_titel = (ki_titel or chat_titel.ersatz(content)) if neuer_chat else None
+    title = conn.execute(
+        "UPDATE chat_konversation SET titel = CASE WHEN titel = ? THEN COALESCE(?, titel) ELSE titel END, "
+        "vermittler_nr = COALESCE(?, vermittler_nr), aktualisiert_am = datetime('now') WHERE id = ? RETURNING titel",
+        (chat_titel.STANDARD_TITEL, erster_titel, reply.vermittler_nr, conversation_id),
+    ).fetchone()["titel"]
+    if titel_future is not None and ki_titel is None and title == erster_titel:
+        chat_titel.nachtragen(titel_future, conversation_id, title)
     message = conn.execute(
         "SELECT id, rolle, inhalt, metadaten_json, erstellt_am FROM chat_nachricht WHERE id = ?", (cursor.lastrowid,)
     ).fetchone()
     return {"message": _chat_message(message), "partner": partner, "findings": reply.findings,
             "openai_configured": reply.configured, "fehler": reply.fehler, "kandidaten": reply.kandidaten,
-            "analysen": reply.analysen, "aenderungsvorschlaege": vorschlaege, "modell": reply.modell}
+            "analysen": reply.analysen, "aenderungsvorschlaege": vorschlaege, "modell": reply.modell, "titel": title}
 
 
 @app.post("/api/chat/analysen/{analyse_id}/neu-berechnen", tags=["Chat"],

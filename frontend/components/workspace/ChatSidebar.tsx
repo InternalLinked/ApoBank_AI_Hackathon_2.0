@@ -65,7 +65,7 @@ export function ChatSidebar({
               onClick={() => { onSelect(conversation.id); onCloseMobile(); }}
             >
               <span className="conversation-icon"><Icon name="chat" size={16} /></span>
-              <span className="conversation-copy"><strong>{conversation.title}</strong><small>{conversation.preview}</small></span>
+              <span className="conversation-copy"><strong title={conversation.title}>{conversation.title}</strong></span>
               <span className="conversation-time">{conversation.updatedAt}</span>
             </button>
             <button
