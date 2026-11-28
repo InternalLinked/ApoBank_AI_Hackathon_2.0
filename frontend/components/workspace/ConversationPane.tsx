@@ -298,7 +298,7 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
               <input ref={fileInputRef} type="file" hidden accept={ATTACHMENT_ACCEPT} onChange={(event) => { pickFile(event.target.files?.[0] ?? null); event.target.value = ""; }} />
               <button type="button" className="composer-upload" onClick={() => fileInputRef.current?.click()} disabled={isSending}
                 aria-label="Datei anhängen (PDF, Word, Excel, Text, Bild)" title="Datei anhängen – PDF, Word, Excel, Text oder Bild, max. 10 MB">
-                <Icon name="upload" size={16} /> <span>Datei anhängen</span>
+                <Icon name="upload" size={16} />
               </button>
             </div>
             <div className="composer-actions"><VoiceButton disabled={isSending} onTranscribe={onTranscribe} onText={insertTranscript} onError={onError} /><button type="submit" className="send-button" disabled={(!value.trim() && !attachment) || isSending} aria-label="Nachricht senden"><Icon name="send" size={16} /></button></div>

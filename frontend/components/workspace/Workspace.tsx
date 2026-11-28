@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createWorkspaceApi, errorMessage } from "@/lib/workspace-api";
 import type { Analysis, ChangeProposal, DashboardData, ChatAttachment, ChatMessage, ExtractedFinding, ManualEntryInput, PartnerCandidate, PartnerDetail, PartnerSummary, StartSuggestion, WorkspaceApi, WorkspaceSnapshot } from "@/lib/workspace-contracts";
 import { ChatSidebar } from "./ChatSidebar";
@@ -33,9 +33,9 @@ export function Workspace() {
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // Mitte: Chat oder Berater-Dashboard (Knopf oben in der linken Leiste)
-  const [view, setView] = useState<"chat" | "dashboard">("chat");
+  const [view, setView] = useState<"chat" | "dashboard">("dashboard");
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
-  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashboardLoading, setDashboardLoading] = useState(true);
   const partnerRequest = useRef(0);
 
   async function loadPartnerDetail(partner: PartnerSummary | null) {
@@ -111,7 +111,7 @@ export function Workspace() {
     }
   }
 
-  async function loadDashboard() {
+  const loadDashboard = useCallback(async () => {
     setDashboardLoading(true);
     try {
       setDashboard(await api.getDashboard());
@@ -120,7 +120,11 @@ export function Workspace() {
     } finally {
       setDashboardLoading(false);
     }
-  }
+  }, [api]);
+
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
 
   function openDashboard() {
     setView("dashboard");

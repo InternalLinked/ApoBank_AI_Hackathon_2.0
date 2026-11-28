@@ -208,11 +208,28 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 .dashboard-kpi small { color: #7085a3; font-size: 11.5px; font-weight: 600; }
 .dashboard-kpi small.is-up { color: #1f8a57; }
 .dashboard-kpi small.is-down { color: #c0392b; }
-.dashboard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
+.dashboard-scroll { container-type: inline-size; }
+.dashboard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 18px; }
+.dashboard-grid > div { display: flex; min-width: 0; flex-direction: column; gap: 18px; }
 .dashboard-grid > .is-wide { grid-column: 1 / -1; }
-.dashboard-grid .analysis-card { height: 100%; box-sizing: border-box; }
+.dashboard-grid .analysis-card { min-width: 0; }
+.dashboard-grid .chart-map .map-stage { width: min(100%, 440px); }
+.dashboard-forecast { margin-inline: 0; margin-bottom: 0; }
+.dashboard-forecast figcaption { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; color: #536879; font-size: 11px; }
+.dashboard-forecast figcaption span { display: inline-flex; align-items: center; gap: 6px; }
+.dashboard-forecast figcaption span::before { width: 16px; border-top: 2px solid #17427f; content: ""; }
+.dashboard-forecast figcaption span:last-child::before { border-top: 2px dashed #0b827d; }
+.dashboard-growth-chart { display: flex; gap: 12px; align-items: flex-start; margin-top: 10px; }
+.dashboard-growth-axis { display: grid; place-items: center; height: 94px; color: #536879; font-size: 11px; writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; }
+.dashboard-growth-months { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: clamp(2px, 0.6cqw, 8px); flex: 1; margin: 0; padding: 0; list-style: none; }
+.dashboard-growth-months li { position: relative; min-width: 0; padding-bottom: 19px; }
+.dashboard-growth-track { display: flex; height: 94px; align-items: flex-end; border-bottom: 1px solid #dbe6f0; }
+.dashboard-growth-track span { width: 100%; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, #42a9ab, #2576a4); }
+.dashboard-growth-track:hover span { background: #17427f; }
+.dashboard-growth-month { position: absolute; left: 0; bottom: 0; color: #607286; font-size: 10px; white-space: nowrap; }
+@container (max-width: 480px) { .dashboard-growth-months li:nth-child(even) .dashboard-growth-month { display: none; } }
 .dashboard-loading { padding: 40px 0; color: #7085a3; text-align: center; }
-@media (max-width: 1200px) { .dashboard-grid { grid-template-columns: minmax(0, 1fr); } .dashboard-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container (max-width: 720px) { .dashboard-grid { grid-template-columns: minmax(0, 1fr); } .dashboard-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .analysis-card { position: relative; padding: 16px 18px 14px; border: 1px solid #e3e9f2; border-radius: 12px; background: #fff; scroll-margin-top: 12px; }
 .analysis-card.is-focused { border-color: #9fb7dc; box-shadow: 0 0 0 3px rgba(23,66,127,.08); }
 .analysis-card-head h3 { margin: 0; color: #20383f; font-size: 14px; font-weight: 650; }
@@ -332,7 +349,7 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 .composer-actions { display: flex; align-items: center; gap: 7px; }
 /* Anhang im Chat: Button links unten, Chip ueber dem Textfeld, Chips in der gesendeten Nachricht */
 .composer-tools { display: flex; align-items: center; gap: 6px; }
-.composer-upload { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 8px; border: 1px solid #dce4ef; border-radius: 8px; color: #4f6177; background: #fff; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: border-color .15s ease, color .15s ease, background .15s ease; }
+.composer-upload { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 30px; padding: 0; border: 1px solid #dce4ef; border-radius: 8px; color: #4f6177; background: #fff; cursor: pointer; transition: border-color .15s ease, color .15s ease, background .15s ease; }
 .composer-upload:hover:not(:disabled) { border-color: var(--sidebar); color: var(--sidebar); background: #eef3fb; }
 .composer-upload:disabled { cursor: default; opacity: .6; }
 .composer-upload:focus-visible { outline: 2px solid #8fb3ff; outline-offset: 1px; }
@@ -345,7 +362,6 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 .message-attachments li { display: inline-flex; max-width: 100%; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid #cfdcef; border-radius: 7px; color: var(--sidebar); background: #fff; font-size: 11px; }
 .message-attachments span { overflow: hidden; max-width: 260px; text-overflow: ellipsis; white-space: nowrap; }
 .message-attachments small { color: #8c9a9b; font-size: 9.5px; }
-@media (max-width: 640px) { .composer-upload span { display: none; } .composer-upload { padding: 0 8px; } }
 .composer-attach { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 8px; color: #879692; background: transparent; }
 .composer-attach:hover { color: #2a806a; background: #f0f7f3; }
 /* Mikrofon (Amazon Transcribe): Ruhezustand wie die anderen Icons, Aufnahme rot mit Timer */

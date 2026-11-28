@@ -227,10 +227,75 @@ function LineChart({ points, unit, title }: { points: Point[]; unit: ChartUnit; 
   );
 }
 
-export function AnalysisChart({ analysis, onSelect, selectHint }: { analysis: Analysis } & SelectProps) {
+function AnnualForecast({ points, unit, throughYear }: { points: Point[]; unit: ChartUnit; throughYear: number }) {
+  const history = points.map(({ label, value }) => ({ year: Number(label), value }))
+    .filter(({ year }) => Number.isInteger(year) && year >= 1900 && year <= throughYear)
+    .sort((a, b) => a.year - b.year);
+  const first = history[0];
+  const last = history[history.length - 1];
+  if (!first || !last || first.year === last.year) {
+    return <LineChart points={points} unit={unit} title="Kreditvolumen je Jahr" />;
+  }
+
+  const meanYear = history.reduce((sum, point) => sum + point.year, 0) / history.length;
+  const meanValue = history.reduce((sum, point) => sum + point.value, 0) / history.length;
+  const variance = history.reduce((sum, point) => sum + (point.year - meanYear) ** 2, 0);
+  const covariance = history.reduce((sum, point) => sum + (point.year - meanYear) * (point.value - meanValue), 0);
+  const future = [last.year + 1, last.year + 2].map((year) => ({
+    year,
+    value: Math.max(0, meanValue + (covariance / variance) * (year - meanYear)),
+  }));
+  const dates = [...history, ...future];
+  const ticks = niceTicks(Math.min(...dates.map((p) => p.value)), Math.max(...dates.map((p) => p.value)));
+  const bottom = 211;
+  const left = 92;
+  const right = 604;
+  const top = 25;
+  const min = ticks[0];
+  const max = ticks[ticks.length - 1];
+  const sx = (year: number) => left + (year - first.year) / (future[1].year - first.year) * (right - left);
+  const sy = (value: number) => bottom - (value - min) / (max - min) * (bottom - top);
+  const path = (values: typeof history) => values.map(({ year, value }, i) => `${i === 0 ? "M" : "L"}${sx(year)} ${sy(value)}`).join(" ");
+  const labelEvery = Math.ceil(history.length / 6);
+  const forecastStart = sx(last.year) + (sx(last.year + 1) - sx(last.year)) / 2;
+  return (
+    <figure className="chart-frame dashboard-forecast">
+      <svg viewBox={`0 0 ${W} 245`} role="img" aria-label="Kreditvolumen der abgeschlossenen Jahre und Trendprojektion für zwei Folgejahre">
+        <rect x={forecastStart} y={top - 9} width={right + 18 - forecastStart} height={bottom - top + 9} rx={7} fill="#eff8f7" />
+        {ticks.map((value) => (
+          <g key={value}>
+            <line x1={left} x2={right + 18} y1={sy(value)} y2={sy(value)} stroke={GRID} />
+            <text x={left - 9} y={sy(value)} textAnchor="end" dominantBaseline="central" className="chart-axis-text" fill={AXIS_TEXT}>{formatValue(value, unit, true)}</text>
+          </g>
+        ))}
+        <path d={path(history)} fill="none" stroke={MARK} strokeWidth={3} strokeLinejoin="round" />
+        <path d={path([last, ...future])} fill="none" stroke="#0b827d" strokeWidth={3} strokeDasharray="7 5" strokeLinejoin="round" />
+        {dates.map(({ year, value }, i) => {
+          const projected = i >= history.length;
+          return (
+            <g key={year}>
+              <circle cx={sx(year)} cy={sy(value)} r={4.5} fill={projected ? "#fff" : MARK} stroke={projected ? "#0b827d" : "#fff"} strokeWidth={2}>
+                <title>{year}: {formatValue(value, unit)}{projected ? " (Projektion)" : ""}</title>
+              </circle>
+              {(projected || year === last.year || i % labelEvery === 0) && (
+                <text x={sx(year)} y={bottom + 21} textAnchor="middle" className="chart-axis-text" fill={projected ? "#0b726d" : AXIS_TEXT}>{year}</text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      <figcaption><span>Abgeschlossene Jahre</span><span>Trendprojektion</span></figcaption>
+    </figure>
+  );
+}
+
+export function AnalysisChart({ analysis, onSelect, selectHint, forecastThroughYear }: { analysis: Analysis; forecastThroughYear?: number } & SelectProps) {
   const points = useMemo(() => chartPoints(analysis), [analysis]);
   if (!points) return null;
   if (analysis.chart.type === "karte" && hasCoordinates(analysis)) return <MapChart analysis={analysis} format={formatValue} />;
+  if (analysis.chart.type === "linie" && analysis.chart.unit === "eur" && forecastThroughYear !== undefined) {
+    return <AnnualForecast points={points} unit={analysis.chart.unit} throughYear={forecastThroughYear} />;
+  }
   return analysis.chart.type === "linie"
     ? <LineChart points={points} unit={analysis.chart.unit} title={analysis.title} />
     : <BarChart points={points} unit={analysis.chart.unit} title={analysis.title} onSelect={onSelect} selectHint={selectHint} />;

@@ -144,12 +144,13 @@ const TOP_OPTIONS = [5, 10, 25];
 type AnalysisCardProps = {
   analysis: Analysis;
   focused: boolean;
+  forecastThroughYear?: number;
   onExport: (a: Analysis) => Promise<void>;
   onRerun: AnalysisPanelProps["onRerun"];
   onOpenPartner: AnalysisPanelProps["onOpenPartner"];
 };
 
-export function AnalysisCard({ analysis, focused, onExport, onRerun, onOpenPartner }: AnalysisCardProps) {
+export function AnalysisCard({ analysis, focused, forecastThroughYear, onExport, onRerun, onOpenPartner }: AnalysisCardProps) {
   const [view, setView] = useState<View>({ y: null, sort: "desc", top: "alle" });
   /** Gerade gewählte Werte, während das Backend neu rechnet (danach kommt die neue Analyse als Prop) */
   const [draft, setDraft] = useState<Record<string, string> | null>(null);
@@ -285,7 +286,7 @@ export function AnalysisCard({ analysis, focused, onExport, onRerun, onOpenPartn
       <div className={`analysis-body ${pending ? "is-pending" : ""}`} aria-busy={pending}>
         {shown.rows.length === 0 && <p className="analysis-no-rows">Keine Daten für diese Auswahl.</p>}
         {hasChart && (
-          <AnalysisChart analysis={shown} onSelect={hasPartners ? selectBar : undefined} selectHint="Klicken öffnet die Partnerakte" />
+          <AnalysisChart analysis={shown} forecastThroughYear={forecastThroughYear} onSelect={hasPartners ? selectBar : undefined} selectHint="Klicken öffnet die Partnerakte" />
         )}
         {(showTable || !hasChart) && shown.rows.length > 0 && (
           <DataTable analysis={shown} onOpenPartner={hasPartners ? openPartner : undefined} />
