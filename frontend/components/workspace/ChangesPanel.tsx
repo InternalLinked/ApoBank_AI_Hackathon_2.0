@@ -90,10 +90,10 @@ function ProposalCard({ proposal, focused, onConfirm, onReject }: {
             {busy === "confirm" ? "Wird gespeichert …" : `${proposal.changes.length === 1 ? "Änderung" : "Alle Änderungen"} bestätigen und speichern`}
           </button>
           <button type="button" className="change-reject" disabled={busy !== null} onClick={() => void run("reject")}>Verwerfen</button>
-          <span className="change-hint">Erst nach dem Bestätigen wird etwas gespeichert. Die Änderung wird in der Obsidian-Akte protokolliert.</span>
+          <span className="change-hint">Erst nach dem Bestätigen wird etwas gespeichert – die neuen Infos stehen dann direkt in der Akte und im Obsidian-Netz.</span>
         </div>
       ) : (
-        <p className="change-done">{proposal.status === "bestaetigt" ? "Gespeichert und in der Obsidian-Akte protokolliert." : "Nicht übernommen."}</p>
+        <p className="change-done">{proposal.status === "bestaetigt" ? "Gespeichert – steht jetzt in der Akte und im Obsidian-Netz." : "Nicht übernommen."}</p>
       )}
     </article>
   );

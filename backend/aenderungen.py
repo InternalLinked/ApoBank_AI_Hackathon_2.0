@@ -230,6 +230,13 @@ def neue_daten_vorschlag(conn: sqlite3.Connection, nr: int,
     }, vorschlag
 
 
+def notiz_titel(angaben: list[dict[str, Any]], max_len: int = 60) -> str:
+    """Titel aus dem Inhalt statt "Aus dem Chat" – so steht im Obsidian-Netz, worum es geht."""
+    erste = str(angaben[0].get("wert", "")).strip() or "Notiz"
+    titel = erste if len(erste) <= max_len else erste[: max_len - 1].rstrip() + "…"
+    return f"{titel} (+{len(angaben) - 1})" if len(angaben) > 1 else titel
+
+
 def obsidian_speichern(conn: sqlite3.Connection, nr: int, angaben: list[dict[str, Any]]
                        ) -> tuple[dict[str, Any], int | None, list[dict[str, str]], str | None]:
     """Schreibt Angaben ins Obsidian-Netz (Profil bzw. Notiz). Wird erst nach der Bestaetigung aufgerufen."""
@@ -255,7 +262,7 @@ def obsidian_speichern(conn: sqlite3.Connection, nr: int, angaben: list[dict[str
         inhalt = [f"- **{i['label']}:** {i['wert']}" for i in notiz if i["gruppe"] != "next-step"]
         massnahmen = [{"beschreibung": str(i["wert"])} for i in notiz if i["gruppe"] == "next-step"]
         res = obsidian.add_entry(v, {
-            "typ": "notiz", "titel": "Aus dem Chat", "inhalt": "\n".join(inhalt) or "Vereinbarte nächste Schritte.",
+            "typ": "notiz", "titel": notiz_titel(notiz), "inhalt": "\n".join(inhalt) or "Vereinbarte nächste Schritte.",
             "massnahmen": massnahmen, "tags": ["chat"], "autor": "copilot", "quelle": "chat",
         })
         conn.execute(
@@ -314,18 +321,8 @@ def ausfuehren(conn: sqlite3.Connection, vorschlag: dict[str, Any]) -> dict[str,
     if neue_angaben:  # neue Profil-Infos und Notizen aus dem Chat
         obsidian_speichern(conn, nr, neue_angaben)
     obsidian.sync_hub(db.get_vermittler_full(conn, nr))
-
-    def fmt(wert: Any) -> str:
-        return "–" if wert in (None, "") else str(wert)
-
-    protokoll = obsidian.add_entry(v_neu, {
-        "typ": "notiz",
-        "titel": "Änderungen aus dem Chat bestätigt",
-        "inhalt": "\n".join(f"- **{i['bereich']} · {i['label']}:** {fmt(i['alt'])} → {fmt(i['neu'])}" for i in items)
-                  + (f"\n\nAnlass: {vorschlag['begruendung']}" if vorschlag.get("begruendung") else ""),
-        "tags": ["aenderung", "chat"], "autor": "copilot", "quelle": "chat-bestaetigt",
-    })
-    conn.execute(
-        "INSERT INTO obsidian_eintrag (vermittler_nr, typ, titel, datum, datei, autor, quelle) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (nr, protokoll["typ"], protokoll["titel"], protokoll["datum"], protokoll["datei"], "copilot", "chat-bestaetigt"))
-    return {"vermittler_nr": nr, "anzahl": len(items), "protokoll": protokoll["datei"]}
+    # Bewusst KEINE eigene "Aenderung wurde gemacht"-Notiz: Im Obsidian-Netz steht die Information selbst
+    # (Profil-Fakt, Notiz, aktualisierte Stammdaten im Hub). Wer wann was geaendert hat (alt -> neu),
+    # bleibt in der Tabelle chat_aenderung nachvollziehbar.
+    return {"vermittler_nr": nr, "anzahl": len(items),
+            "aenderungen": [{"bereich": i["bereich"], "feld": i["label"], "alt": i["alt"], "neu": i["neu"]} for i in items]}

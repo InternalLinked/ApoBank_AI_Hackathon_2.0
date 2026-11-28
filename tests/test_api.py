@@ -237,9 +237,13 @@ def test_ki_aenderungen_erst_nach_bestaetigung(client, monkeypatch):
     v = client.get("/api/vermittler/4251").json()
     assert v["kontakt"]["email"] == "h.baumann@neu.de" and v["interessen"] == ["Sport", "Segeln"]
     assert next(g for g in v["geschaeftszahlen"] if g["jahr"] == 2025)["volumen_eur"] == 11_000_000
-    # Protokollnotiz im Obsidian-Gehirn
-    assert any("Änderungen aus dem Chat bestätigt" in e.get("titel", "")
-               for e in client.get("/api/vermittler/4251/obsidian").json()["eintraege"])
+    # Im Obsidian-Gehirn steht die neue Information selbst – keine "Aenderung wurde gemacht"-Notiz
+    assert not client.get("/api/vermittler/4251/obsidian").json()["eintraege"]
+    hub = client.get("/api/vermittler/4251/obsidian/inhalt?format=text").text
+    assert "h.baumann@neu.de" in hub and "abc.aaa@abc.de" not in hub
+    netz = client.get("/api/vermittler/4251/obsidian/netz").json()
+    assert not any("Änderung" in k["label"] for k in netz["knoten"])
+    assert any("Segeln" in k["label"] for k in netz["knoten"])  # neues Interesse als Knoten im Netz
 
     # Kein zweites Bestaetigen; Status im Verlauf ist "bestaetigt"
     assert client.post(f"/api/chat/aenderungen/{vorschlag['id']}/bestaetigen", headers=BROWSER_A).status_code == 409

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "@/lib/workspace-api";
 import type { ObsidianGraph as Graph, ObsidianGraphNode, WorkspaceApi } from "@/lib/workspace-contracts";
 
@@ -80,10 +80,74 @@ function shortLabel(text: string, max = 18): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
+// Hover-Vergroesserung: Die Karte loest sich aus dem (seitlich abschneidenden) Panel, bleibt rechts oben
+// verankert und waechst nach links/unten – das Seitenverhaeltnis des Netzes bleibt gleich.
+const ZOOM = 1.9;
+const RAND = 16;              // Mindestabstand zum Fensterrand
+const HOVER_DELAY_MS = 180;   // nicht schon beim blossen Drueberwischen aufspringen
+const ANIMATION_MS = 220;
+
+type Floating = { top: number; right: number; width: number; baseWidth: number; baseHeight: number; targetTop: number; targetWidth: number };
+
 /** Lokale Graph-Ansicht wie in Obsidian: der aktuelle Vermittler und alles, was mit ihm verbunden ist. */
 export function ObsidianGraph({ api, vermittlerNr, refreshKey, onError }: ObsidianGraphProps) {
   const [graph, setGraph] = useState<Graph | null>(null);
   const [hovered, setHovered] = useState<ObsidianGraphNode | null>(null);
+  const cardRef = useRef<HTMLElement>(null);
+  const [floating, setFloating] = useState<Floating | null>(null);
+  const [grown, setGrown] = useState(false);
+  const openTimer = useRef<number | null>(null);
+  const closeTimer = useRef<number | null>(null);
+
+  function clearTimers() {
+    if (openTimer.current) window.clearTimeout(openTimer.current);
+    if (closeTimer.current) window.clearTimeout(closeTimer.current);
+    openTimer.current = closeTimer.current = null;
+  }
+
+  function startGrow() {
+    clearTimers();
+    if (floating) { setGrown(true); return; }   // war gerade am Schrumpfen -> wieder gross
+    if (!graph || !window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+    openTimer.current = window.setTimeout(() => {
+      const el = cardRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const targetWidth = Math.min(r.width * ZOOM, r.right - RAND);   // nach links bis knapp an den Fensterrand
+      if (targetWidth < r.width * 1.15) return;                       // zu wenig Platz: lohnt nicht
+      const targetHeight = r.height * (targetWidth / r.width);        // obere Schaetzung (Texte wachsen nicht mit)
+      const targetTop = Math.max(RAND, Math.min(r.top, window.innerHeight - targetHeight - RAND));
+      setFloating({ top: r.top, right: window.innerWidth - r.right, width: r.width, baseWidth: r.width, baseHeight: r.height, targetTop, targetWidth });
+      // erst in Ausgangsgroesse fixieren, dann im naechsten Frame wachsen lassen -> fluessige Animation
+      requestAnimationFrame(() => requestAnimationFrame(() => setGrown(true)));
+    }, HOVER_DELAY_MS);
+  }
+
+  function shrink() {
+    clearTimers();
+    if (!floating) return;
+    setGrown(false);
+    closeTimer.current = window.setTimeout(() => setFloating(null), ANIMATION_MS);
+  }
+
+  // Vergroesserte Karte bei Scrollen, Fenstergroesse oder Esc sofort zuruecksetzen (sonst stimmt die Position nicht)
+  useEffect(() => {
+    if (!floating) return;
+    const reset = () => { clearTimers(); setGrown(false); setFloating(null); };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") reset(); };
+    window.addEventListener("scroll", reset, true);
+    window.addEventListener("resize", reset);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("scroll", reset, true);
+      window.removeEventListener("resize", reset);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [floating]);
+
+  useEffect(() => () => clearTimers(), []);
+  // Anderer Vermittler: nie mit alter Position stehen bleiben
+  useEffect(() => { setGrown(false); setFloating(null); }, [vermittlerNr]);
 
   useEffect(() => {
     let active = true;
@@ -104,8 +168,21 @@ export function ObsidianGraph({ api, vermittlerNr, refreshKey, onError }: Obsidi
     if (node.uri) window.location.href = node.uri;
   }
 
+  const floatingStyle: CSSProperties | undefined = floating ? {
+    position: "fixed",
+    top: grown ? floating.targetTop : floating.top,
+    right: floating.right,
+    width: grown ? floating.targetWidth : floating.width,
+    margin: 0,
+    zIndex: 60,
+  } : undefined;
+
   return (
-    <section className="obsidian-graph" aria-label="Obsidian-Netz">
+    <>
+    {/* Platzhalter haelt die Hoehe im Panel, solange die Karte schwebt – nichts darunter springt */}
+    {floating && <div className="obsidian-graph-placeholder" style={{ height: floating.baseHeight }} aria-hidden="true" />}
+    <section ref={cardRef} className={`obsidian-graph ${floating ? "is-floating" : ""} ${grown ? "is-grown" : ""}`} style={floatingStyle}
+      aria-label="Obsidian-Netz" onMouseEnter={startGrow} onMouseLeave={shrink}>
       <div className="partner-profile-heading"><h3>Obsidian-Netz</h3><span>{graph ? `${graph.nodes.length} Knoten` : "lädt …"}</span></div>
       <div className="obsidian-graph-canvas">
         {graph && <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label="Verbindungen des Vermittlers in Obsidian">
@@ -138,5 +215,6 @@ export function ObsidianGraph({ api, vermittlerNr, refreshKey, onError }: Obsidi
         {types.map((type) => <span key={type}><i style={{ background: (STYLE[type] ?? STYLE.notiz).color }} />{(STYLE[type] ?? STYLE.notiz).label}</span>)}
       </div>
     </section>
+    </>
   );
 }
