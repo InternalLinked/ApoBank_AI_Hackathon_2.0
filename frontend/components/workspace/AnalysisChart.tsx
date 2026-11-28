@@ -15,7 +15,7 @@ const MARK = "#17427f";
 const MARK_HOVER = "#0d2857";
 const GRID = "#e6ebf2";
 const AXIS_TEXT = "#6b7a88";
-const MAX_BARS = 25;
+const BARS_PER_PAGE = 10;
 
 export type Point = { label: string; value: number; rowIndex: number };
 
@@ -96,22 +96,26 @@ type SelectProps = {
 
 function BarChart({ points, unit, title, onSelect, selectHint }: { points: Point[]; unit: ChartUnit; title: string } & SelectProps) {
   const [hover, setHover] = useState<number | null>(null);
-  const shown = points.slice(0, MAX_BARS);
-  const labelChars = Math.min(28, Math.max(...shown.map((p) => p.label.length)));
+  const [page, setPage] = useState(0);
+  const pageCount = Math.ceil(points.length / BARS_PER_PAGE);
+  const currentPage = Math.min(page, pageCount - 1);
+  const offset = currentPage * BARS_PER_PAGE;
+  const shown = points.slice(offset, offset + BARS_PER_PAGE);
+  const labelChars = Math.min(28, Math.max(...points.map((p) => p.label.length)));
   const labelW = Math.min(210, labelChars * 6.4 + 14);
-  const rowH = 30;
-  const barH = 18;
+  const rowH = 24;
+  const barH = 15;
   const top = 6;
   const axisH = 26;
   const H = top + shown.length * rowH + axisH;
-  const ticks = niceTicks(Math.min(...shown.map((p) => p.value)), Math.max(...shown.map((p) => p.value)));
+  const ticks = niceTicks(Math.min(...points.map((p) => p.value)), Math.max(...points.map((p) => p.value)));
   const lo = ticks[0];
   const hi = ticks[ticks.length - 1];
   const plotL = labelW;
   const plotR = W - 70; // Platz für die Direktbeschriftung des größten Werts
   const sx = (v: number) => plotL + ((v - lo) / (hi - lo)) * (plotR - plotL);
   const maxIndex = shown.reduce((best, p, i) => (p.value > shown[best].value ? i : best), 0);
-  const tip: TooltipState = hover === null ? null : {
+  const tip: TooltipState = hover === null || !shown[hover] ? null : {
     left: (Math.max(sx(shown[hover].value), sx(0)) / W) * 100,
     top: ((top + hover * rowH + rowH / 2) / H) * 100,
     label: shown[hover].label,
@@ -120,45 +124,55 @@ function BarChart({ points, unit, title, onSelect, selectHint }: { points: Point
   };
 
   return (
-    <div className={onSelect ? "chart-frame is-selectable" : "chart-frame"}>
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${title}: Balkendiagramm mit ${shown.length} Einträgen`} onMouseLeave={() => setHover(null)}>
-        {ticks.map((t) => (
-          <g key={t}>
-            <line x1={sx(t)} x2={sx(t)} y1={top} y2={H - axisH} stroke={GRID} strokeWidth={1} />
-            <text x={sx(t)} y={H - 8} textAnchor="middle" className="chart-axis-text" fill={AXIS_TEXT}>{formatValue(t, unit, true)}</text>
-          </g>
-        ))}
-        {shown.map((p, i) => {
-          const y = top + i * rowH + (rowH - barH) / 2;
-          const x0 = sx(0);
-          const x1 = sx(p.value);
-          return (
-            <g key={`${p.label}-${i}`}>
-              <text x={labelW - 10} y={y + barH / 2} textAnchor="end" dominantBaseline="central" className="chart-label-text">
-                <title>{p.label}</title>
-                {truncate(p.label, 28)}
-              </text>
-              <path d={barPath(x0, x1, y, barH)} fill={hover === i ? MARK_HOVER : MARK} />
-              {i === maxIndex && (
-                <text x={Math.max(x0, x1) + 6} y={y + barH / 2} dominantBaseline="central" className="chart-value-text">{formatValue(p.value, unit, true)}</text>
-              )}
-              {/* Trefferfläche größer als der Balken: ganze Zeile */}
-              <rect x={0} y={top + i * rowH} width={W} height={rowH} fill="transparent" onMouseEnter={() => setHover(i)} onFocus={() => setHover(i)} tabIndex={0}
-                aria-label={`${p.label}: ${formatValue(p.value, unit)}${onSelect && selectHint ? ` – ${selectHint}` : ""}`}
-                role={onSelect ? "button" : undefined}
-                className={onSelect ? "chart-hit is-clickable" : "chart-hit"}
-                onClick={onSelect ? () => onSelect(p) : undefined}
-                onKeyDown={onSelect ? (event) => {
-                  if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(p); }
-                } : undefined} />
+    <>
+      <div className={onSelect ? "chart-frame is-selectable" : "chart-frame"}>
+        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${title}: Balkendiagramm mit ${shown.length} Einträgen`} onMouseLeave={() => setHover(null)}>
+          {ticks.map((t) => (
+            <g key={t}>
+              <line x1={sx(t)} x2={sx(t)} y1={top} y2={H - axisH} stroke={GRID} strokeWidth={1} />
+              <text x={sx(t)} y={H - 8} textAnchor="middle" className="chart-axis-text" fill={AXIS_TEXT}>{formatValue(t, unit, true)}</text>
             </g>
-          );
-        })}
-        <line x1={sx(0)} x2={sx(0)} y1={top} y2={H - axisH} stroke="#b9c4d2" strokeWidth={1} />
-      </svg>
-      <Tooltip tip={tip} />
-      {points.length > MAX_BARS && <p className="chart-note">Es werden die ersten {MAX_BARS} von {points.length} Zeilen gezeigt – alle stehen in der Tabelle.</p>}
-    </div>
+          ))}
+          {shown.map((p, i) => {
+            const y = top + i * rowH + (rowH - barH) / 2;
+            const x0 = sx(0);
+            const x1 = sx(p.value);
+            return (
+              <g key={`${p.label}-${i}`}>
+                <text x={labelW - 10} y={y + barH / 2} textAnchor="end" dominantBaseline="central" className="chart-label-text">
+                  <title>{p.label}</title>
+                  {truncate(p.label, 28)}
+                </text>
+                <path d={barPath(x0, x1, y, barH)} fill={hover === i ? MARK_HOVER : MARK} />
+                {i === maxIndex && (
+                  <text x={Math.max(x0, x1) + 6} y={y + barH / 2} dominantBaseline="central" className="chart-value-text">{formatValue(p.value, unit, true)}</text>
+                )}
+                {/* Trefferfläche größer als der Balken: ganze Zeile */}
+                <rect x={0} y={top + i * rowH} width={W} height={rowH} fill="transparent" onMouseEnter={() => setHover(i)} onFocus={() => setHover(i)} tabIndex={0}
+                  aria-label={`${p.label}: ${formatValue(p.value, unit)}${onSelect && selectHint ? ` – ${selectHint}` : ""}`}
+                  role={onSelect ? "button" : undefined}
+                  className={onSelect ? "chart-hit is-clickable" : "chart-hit"}
+                  onClick={onSelect ? () => onSelect(p) : undefined}
+                  onKeyDown={onSelect ? (event) => {
+                    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(p); }
+                  } : undefined} />
+              </g>
+            );
+          })}
+          <line x1={sx(0)} x2={sx(0)} y1={top} y2={H - axisH} stroke="#b9c4d2" strokeWidth={1} />
+        </svg>
+        <Tooltip tip={tip} />
+      </div>
+      {pageCount > 1 && (
+        <nav className="chart-pagination" aria-label="Balkendiagramm-Seiten">
+          <button type="button" className="analysis-secondary-button" disabled={currentPage === 0}
+            onClick={() => { setHover(null); setPage(currentPage - 1); }}>Zurück</button>
+          <span aria-live="polite">{offset + 1}–{offset + shown.length} von {points.length}</span>
+          <button type="button" className="analysis-secondary-button" disabled={currentPage >= pageCount - 1}
+            onClick={() => { setHover(null); setPage(currentPage + 1); }}>Weiter</button>
+        </nav>
+      )}
+    </>
   );
 }
 

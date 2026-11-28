@@ -209,6 +209,9 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 .chart-tooltip span { color: #6b7a88; font-size: 11px; }
 .chart-tooltip strong { color: #20383f; font-size: 14px; }
 .chart-note { margin: 8px 0 0; color: #8c9a9b; font-size: 11px; }
+.chart-pagination { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; color: #53656a; font-size: 12px; }
+.chart-pagination .analysis-secondary-button { padding: 5px 9px; }
+.chart-pagination .analysis-secondary-button:disabled { opacity: .45; cursor: default; border-color: #d9e4f5; }
 .chart-tooltip em { color: #17427f; font-size: 11px; font-style: normal; font-weight: 600; }
 .chart-frame.is-selectable .chart-hit.is-clickable { cursor: pointer; }
 /* Kartenansicht (MapChart.tsx): hochkant (371 × 496) – Breite aus der Fensterhöhe, damit die ganze Karte samt
