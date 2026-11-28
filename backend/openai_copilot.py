@@ -54,8 +54,10 @@ oder Kennzahlen immer die bereitgestellten Tools. Erfinde keine Daten, Namen ode
 - Partnerakte / Zusammenfassung: Kernaussage → `### Ueberblick` (Firma, Status, Betreuer, Filiale)
   → `### Geschaeft` (letzte Jahre, kurze Einordnung) → `### Persoenliches` (falls vorhanden)
   → `### Offene Punkte` → Links.
-- Gespraechsvorbereitung: Kernaussage → `### Gespraechseinstieg` (1–2 persoenliche Anknuepfungspunkte
-  aus dem Profil) → `### Zahlen & Entwicklung` → `### Offene Punkte & Ziele fuer das Gespraech` → Links.
+- Gespraechsvorbereitung / "aktueller Stand": Kernaussage → `### Letztes Gespraech` (Datum + die wichtigsten
+  Punkte aus `letzte_gespraeche`, neuestes zuerst) → `### Offene Massnahmen` (aus `offene_massnahmen`, mit
+  Faelligkeit; ueberfaellige hervorheben) → `### Gespraechseinstieg` (1–2 persoenliche Anknuepfungspunkte aus
+  dem Profil) → `### Zahlen & Entwicklung` → `### Ziele fuer das Gespraech` → Links.
 - Nach einem Vorschlag: ein Satz "Zur Bestaetigung vorbereitet:" + kurze Liste, was wohin soll, + Hinweis,
   dass es erst nach Klick auf "Bestaetigen" im Tab "Aenderungen" gespeichert ist. Schreibe NIE "Gespeichert".
 
@@ -89,8 +91,12 @@ Gruppen beim Speichern:
 - "partner" / "business": Gespraechsinhalte bzw. geschaeftliche Angaben -> Notiz.
 - "next-step": vereinbarte naechste Schritte -> Massnahme in der Notiz.
 
-Die Partnerakte enthaelt das persoenliche Profil. Nutze es bei
-Gespraechsvorbereitungen fuer passende Gespraechseinstiege.
+Die Partnerakte (`hole_partnerakte`) enthaelt neben Stammdaten und Zahlen das persoenliche Profil, die
+letzten Gespraeche MIT Inhalt (`letzte_gespraeche`), alle offenen Massnahmen (`offene_massnahmen`) und ggf.
+eine KI-Zusammenfassung. Bei Fragen wie "Ich rede heute mit X", "Was war der letzte Stand?", "Bereite mein
+Gespraech vor" rufe IMMER `hole_partnerakte` auf und stuetze die Antwort auf diese Gespraeche und Massnahmen –
+nicht nur auf Stammdaten. Gibt es mehr Eintraege als gezeigt (`anzahl_eintraege_gesamt`), nutze bei Bedarf
+`suche_notizen`. Sind keine Gespraeche erfasst, sag das ausdruecklich.
 
 Mehrere Treffer: Liefert `suche_vermittler` mehr als einen passenden Vermittler und ist nicht
 eindeutig, welcher gemeint ist (z. B. "Scholz"), rate nicht. Rufe `auswahl_anbieten` mit den
@@ -533,8 +539,19 @@ def _openai_fehler(exc: Exception) -> CopilotReply:
                          "Details stehen im Backend-Log.")
 
 
+# Titel/Anreden stehen nicht in Vor-/Nachname (sondern in v.titel) -> fuer die Suche ignorieren,
+# sonst findet "Dr. Hans Baumann" niemanden (alle Woerter sind UND-verknuepft).
+_TITEL_TOKEN = re.compile(r"^(dr|prof|dipl|ing|med|dent|vet|rer|pol|nat|oec|jur|phil|habil|mba|herr|herrn|frau|hr|fr)\.?$",
+                          re.IGNORECASE)
+
+
+def _norm(text: str | None) -> str:
+    return (text or "").strip().casefold()
+
+
 def _search_vermittler(conn: sqlite3.Connection, suchbegriff: str) -> dict[str, Any]:
-    tokens = [token for token in suchbegriff.split() if token]
+    roh = [token.strip(",;") for token in suchbegriff.replace("-", " ").split() if token.strip(",;")]
+    tokens = [token for token in roh if not _TITEL_TOKEN.match(token)] or roh
     where = []
     params: list[Any] = []
     for token in tokens:
@@ -551,7 +568,33 @@ def _search_vermittler(conn: sqlite3.Connection, suchbegriff: str) -> dict[str, 
         "FROM v_vermittler v WHERE " + " AND ".join(where) + f" ORDER BY name, vorname LIMIT {MAX_KANDIDATEN}",
         params,
     ).fetchall()
-    return {"items": db.rows_to_dicts(rows)}
+    items = db.rows_to_dicts(rows)
+    # Exakter Treffer gewinnt: Stehen Vor- UND Nachname genau so in der Suche ("Hans Baumann"), ist der
+    # Vermittler eindeutig – auch wenn es weitere mit gleichem Nachnamen gibt (z. B. Susanne Baumann).
+    gesucht = {_norm(t) for t in tokens}
+    exakt = [i for i in items if _norm(i["vorname"]) in gesucht and _norm(i["name"]) in gesucht]
+    if len(items) > 1 and len(exakt) == 1:
+        return {"items": exakt, "hinweis": f"Eindeutig ueber Vor- und Nachname; {len(items) - 1} weitere(r) mit "
+                                           "gleichem Nachnamen ausgeblendet."}
+    # Titel/Anrede als Filter bei mehreren Treffern: "Herrn Dr. Baumann" -> nur der Herr mit Doktortitel
+    if len(items) > 1:
+        titel = [t.rstrip(".").casefold() for t in roh if _TITEL_TOKEN.match(t)]
+        passend = items
+        for t in titel:
+            if t in ("herr", "herrn", "hr"):
+                passend = [i for i in passend if "herr" in _norm(_anrede(conn, i["vermittler_nr"]))]
+            elif t in ("frau", "fr"):
+                passend = [i for i in passend if "frau" in _norm(_anrede(conn, i["vermittler_nr"]))]
+            elif t in ("dr", "prof"):
+                passend = [i for i in passend if t in _norm(i.get("titel"))]
+        if len(passend) == 1:
+            return {"items": passend, "hinweis": "Eindeutig ueber Titel/Anrede; weitere mit gleichem Namen ausgeblendet."}
+    return {"items": items}
+
+
+def _anrede(conn: sqlite3.Connection, nr: int) -> str:
+    row = conn.execute("SELECT anrede FROM vermittler WHERE vermittler_nr = ?", (nr,)).fetchone()
+    return row[0] if row and row[0] else ""
 
 
 def _portfolio_ueberblick(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -630,6 +673,51 @@ def _datenbank_fallback(conn: sqlite3.Connection, message: str) -> CopilotReply:
     )
 
 
+LETZTE_GESPRAECHE = 5          # so viele Notizen mit Inhalt bekommt die KI in der Partnerakte
+GESPRAECH_MAX_ZEICHEN = 1500   # je Notiz (Rest ueber suche_notizen / Obsidian-Link)
+_MASSNAHME_RE = re.compile(r"^\s*-\s\[ \]\s+(?P<text>.+?)\s*$")
+
+
+def _gespraechsverlauf(nr: int) -> dict[str, Any]:
+    """Was die KI fuer "aktueller Stand", "letztes Gespraech", "Termin vorbereiten" braucht:
+    letzte Notizen MIT Inhalt, alle offenen Massnahmen und die KI-Zusammenfassung aus dem Hub."""
+    brain = obsidian.read_brain(nr)
+    eintraege = brain["eintraege"]                      # neueste zuerst
+    letzte = []
+    for e in eintraege[:LETZTE_GESPRAECHE]:
+        fm = e["frontmatter"]
+        inhalt = (e.get("inhalt") or "").strip()
+        letzte.append({
+            "datum": fm.get("datum"), "typ": fm.get("typ"), "titel": fm.get("titel"),
+            "teilnehmer": fm.get("teilnehmer") or None,
+            "inhalt": inhalt if len(inhalt) <= GESPRAECH_MAX_ZEICHEN else inhalt[:GESPRAECH_MAX_ZEICHEN] + " …(gekuerzt)",
+            "link": obsidian.obsidian_uri(e["datei"]),
+        })
+    offen = []
+    for e in eintraege:                                   # offene Aufgaben aus ALLEN Notizen, nicht nur den letzten 5
+        for zeile in (e.get("inhalt") or "").splitlines():
+            m = _MASSNAHME_RE.match(zeile)
+            if m:
+                text = m.group("text")
+                faellig = re.search(r"📅\s*(\d{4}-\d{2}-\d{2})", text)
+                person = re.search(r"👤\s*([^📅]+?)\s*(?=📅|$)", text)
+                offen.append({
+                    "massnahme": re.sub(r"\s*(👤|📅).*$", "", text).strip(),
+                    "verantwortlich": person.group(1).strip() if person else None,
+                    "faellig_am": faellig.group(1) if faellig else None,
+                    "aus_notiz": e["frontmatter"].get("titel"), "notiert_am": e["frontmatter"].get("datum"),
+                })
+    zusammenfassung = (brain.get("zusammenfassung") or "").strip()
+    if "Noch keine Zusammenfassung" in zusammenfassung:
+        zusammenfassung = ""
+    return {
+        "letzte_gespraeche": letzte,
+        "anzahl_eintraege_gesamt": len(eintraege),
+        "offene_massnahmen": sorted(offen, key=lambda m: m["faellig_am"] or "9999"),
+        "ki_zusammenfassung": zusammenfassung or None,
+    }
+
+
 def _vorschlag_zusammenfuehren(vorschlaege: list[dict[str, Any]], neu: dict[str, Any]) -> list[dict[str, Any]]:
     """Mehrere Vorschlaege zum selben Vermittler in einer Antwort -> EINE Karte zum Bestaetigen."""
     vorhanden = next((v for v in vorschlaege if v["vermittler_nr"] == neu["vermittler_nr"]), None)
@@ -667,7 +755,8 @@ def _execute_tool(conn: sqlite3.Connection, name: str, arguments: dict[str, Any]
         if email:
             links["email"] = f"mailto:{email}"
         profile = {**profile, "links": links, "persoenliches_profil": [
-            {"kategorie": f["kategorie_label"], "info": f["text"], "notiert_am": f["datum"]} for f in profil["fakten"]]}
+            {"kategorie": f["kategorie_label"], "info": f["text"], "notiert_am": f["datum"]} for f in profil["fakten"]],
+            **_gespraechsverlauf(nr)}
         return profile, nr, [], "Partnerakte"
     if name == "suche_notizen":
         treffer = obsidian.search(str(arguments["suchbegriff"]), limit=8)

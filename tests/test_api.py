@@ -737,6 +737,41 @@ def test_anhang_geht_mit_der_nachricht_an_die_ki(client, monkeypatch):
     assert [a["name"] for a in verlauf[0]["metadata"]["anhaenge"]] == ["p.txt", "n.png"]
 
 
+def test_partnerakte_fuer_ki_enthaelt_letzte_gespraeche_und_offene_massnahmen(client):
+    from backend import db, openai_copilot
+    client.post("/api/vermittler/4251/obsidian/eintraege", json={
+        "typ": "gespraech", "titel": "Jahresgespräch 2026", "datum": "2026-11-20",
+        "inhalt": "Plant zweite Praxis in Bielefeld, braucht Finanzierung bis Q2.",
+        "massnahmen": [{"beschreibung": "Konditionen schicken", "verantwortlich": "Schumann", "faellig_am": "2026-12-01"}]})
+    conn = db.connect()
+    try:
+        akte, *_ = openai_copilot._execute_tool(conn, "hole_partnerakte", {"vermittler_nr": 4251})
+    finally:
+        conn.close()
+    [gespraech] = akte["letzte_gespraeche"]
+    assert gespraech["titel"] == "Jahresgespräch 2026" and "zweite Praxis in Bielefeld" in gespraech["inhalt"]
+    assert akte["anzahl_eintraege_gesamt"] == 1
+    assert akte["offene_massnahmen"] == [{"massnahme": "Konditionen schicken", "verantwortlich": "Schumann",
+                                          "faellig_am": "2026-12-01", "aus_notiz": "Jahresgespräch 2026",
+                                          "notiert_am": "2026-11-20"}]
+
+
+def test_vermittlersuche_mit_titel_und_namensgleichen(client):
+    from backend import db, openai_copilot
+    assert client.post("/api/vermittler", json={"vorname": "Susanne", "name": "Baumann", "anrede": "Sehr geehrte Frau"}).status_code == 201
+    conn = db.connect()
+    try:
+        def treffer(q):
+            return [(i["vorname"], i["name"]) for i in openai_copilot._search_vermittler(conn, q)["items"]]
+        assert treffer("Dr. Hans Baumann") == [("Hans", "Baumann")]          # Titel steht nicht im Namen
+        assert treffer("Prof. Dr. med. Hans Baumann") == [("Hans", "Baumann")]
+        assert treffer("Herrn Dr. Baumann") == [("Hans", "Baumann")]         # Titel/Anrede als Filter
+        assert treffer("Frau Baumann") == [("Susanne", "Baumann")]
+        assert sorted(treffer("Baumann")) == [("Hans", "Baumann"), ("Susanne", "Baumann")]  # echt mehrdeutig
+    finally:
+        conn.close()
+
+
 def test_copilot_speichert_nichts_bei_unbekanntem_vermittler(client):
     from backend import db, openai_copilot
     conn = db.connect()
