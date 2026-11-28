@@ -187,6 +187,17 @@ while offset is not None:
 | `GET /api/analytics/ueberblick` | `?marktgebiet=Süd` – Summen je Jahr, Verteilungen |
 
 `gruppe` ∈ `vermittler | filiale | marktgebiet | betreuer | vermittlertyp | status_vertriebspartner | abrechnungskreis`.
+
+### Berater-Dashboard (POC, ohne Login)
+| Methode | Pfad | Zweck |
+|---|---|---|
+| GET | `/api/dashboard` | `berater`, `kennzahlen` (Jahr 2025 vs. Vorjahr) und `analysen[]` (Verlauf, Top, Karte, Partnerstatus, Liste) |
+| POST | `/api/dashboard/analysen/{schluessel}/neu-berechnen` | `{"werte": {...}}` – Auswahl (Jahr, Kennzahl, Anzahl) neu berechnen |
+
+Berater = Betreuer aus der Excel (`betreuer` / `vermittler.mitarbeiter_id`), fest eingestellt über
+`APOBANK_BETREUERKONTO_ID` (Standard `MGK76244` = Hartmann, 26 Vermittler). Alle Dashboard-SQLs (`backend/dashboard.py`)
+binden das Konto als `:konto` über `feste_werte` – es ist nicht wählbar, jedes Diagramm zeigt nur eigene Vermittler.
+Frontend: Knopf „Dashboard“ oben in der linken Leiste → `DashboardView.tsx` in der Mitte (nutzt `AnalysisCard`).
 Filter: `marktgebiet`, `filial_nr`, `mitarbeiter_id`, `status`.
 
 ### Obsidian-Gehirn
@@ -202,7 +213,7 @@ Filter: `marktgebiet`, `filial_nr`, `mitarbeiter_id`, `status`.
 | GET | `/api/vermittler/{nr}/profil` | Persönliches Profil: `fakten[]` (`id`, `kategorie`, `text`, `datum`) + `obsidian://`-Link |
 | POST | `/api/vermittler/{nr}/profil/fakten` | `{text, kategorie?, datum?}` – persönliche Info ablegen (ohne Kategorie: Stichwort-Erkennung) |
 | DELETE | `/api/vermittler/{nr}/profil/fakten/{id}` | Info entfernen |
-| GET | `/api/vermittler/{nr}/obsidian/netz` | Lokaler Graph: `knoten[]` (`id`, `label`, `typ`, `uri`), `kanten[]` – Hub, Profil, Infos, Einträge, Betreuer/Filiale, Wiki- und Backlinks |
+| GET | `/api/vermittler/{nr}/obsidian/netz` | Lokaler Graph: `knoten[]` (`id`, `label`, `typ`, `uri`), `kanten[]` – Hub, Profil → Kategorie (`kategorie:<slug>`, Link springt zur Überschrift) → Infos, Einträge, Betreuer/Filiale, Wiki- und Backlinks |
 
 Profil-Kategorien: `interessen | familie | haustiere | hobbys | reisen | vorlieben | termine | sonstiges`.
 **Interessen:** Die DB-Spalte `vermittler.interessen` wird automatisch ins Profil (`## Interessen`) übernommen – bei

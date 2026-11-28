@@ -16,6 +16,7 @@ const HEIGHT = 230;
 const STYLE: Record<string, { color: string; radius: number; label: string }> = {
   vermittler: { color: "#17427f", radius: 9, label: "Vermittler" },
   profil: { color: "#c08a2b", radius: 6, label: "Profil" },
+  kategorie: { color: "#e0795a", radius: 4.5, label: "Kategorie" },
   fakt: { color: "#e2be72", radius: 3.5, label: "Persönliche Info" },
   eintrag: { color: "#5b8fd6", radius: 4.5, label: "Eintrag" },
   betreuer: { color: "#4f9a7b", radius: 5, label: "Betreuer" },
@@ -34,7 +35,7 @@ function layout(graph: Graph): Record<string, Point> {
   const cy = HEIGHT / 2;
   ids.forEach((id, index) => {
     const angle = (index / Math.max(ids.length, 1)) * Math.PI * 2;
-    const ring = id === graph.center ? 0 : graph.nodes[index]?.type === "fakt" ? 95 : 65;
+    const ring = id === graph.center ? 0 : graph.nodes[index]?.type === "fakt" ? 110 : graph.nodes[index]?.type === "kategorie" ? 85 : 65;
     pos[id] = { x: cx + Math.cos(angle) * ring, y: cy + Math.sin(angle) * ring };
   });
   const links = graph.edges.filter((edge) => pos[edge.from] && pos[edge.to]);

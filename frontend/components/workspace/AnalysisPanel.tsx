@@ -149,7 +149,7 @@ type AnalysisCardProps = {
   onOpenPartner: AnalysisPanelProps["onOpenPartner"];
 };
 
-function AnalysisCard({ analysis, focused, onExport, onRerun, onOpenPartner }: AnalysisCardProps) {
+export function AnalysisCard({ analysis, focused, onExport, onRerun, onOpenPartner }: AnalysisCardProps) {
   const [view, setView] = useState<View>({ y: null, sort: "desc", top: "alle" });
   /** Gerade gewählte Werte, während das Backend neu rechnet (danach kommt die neue Analyse als Prop) */
   const [draft, setDraft] = useState<Record<string, string> | null>(null);

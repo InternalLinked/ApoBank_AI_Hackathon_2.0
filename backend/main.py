@@ -24,7 +24,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import aenderungen, analysen, anhaenge, chat_titel, db, excel_export, obsidian, openai_copilot, transcribe, vermittler_links
+from . import aenderungen, analysen, anhaenge, chat_titel, dashboard, db, excel_export, obsidian, openai_copilot, transcribe, vermittler_links
 from .config import settings
 from .schemas import (AnalyseNeuIn, ChatKonversationCreate, ChatNachrichtIn, EintragIn, ExportTabelleIn, GeschaeftszahlIn, ProfilFaktIn,
                       SqlQueryIn, VermittlerCreate, VermittlerUpdate, ZusammenfassungIn)
@@ -780,6 +780,34 @@ def _eigener_chat(conn: Conn, conversation_id: str, client: str) -> sqlite3.Row:
     if row is None:  # fremde Chats bewusst ebenfalls 404, damit ihre Existenz nicht verraten wird
         raise HTTPException(404, "Chat nicht gefunden")
     return row
+
+
+@app.get("/api/dashboard", tags=["Dashboard"],
+         summary="Berater-Dashboard: Kennzahlen und Diagramme nur ueber die eigenen Vermittler des Betreuerkontos")
+def get_dashboard(conn: Conn = Depends(db.get_conn)) -> dict[str, Any]:
+    """POC ohne Login: Betreuer = APOBANK_BETREUERKONTO_ID (Standard Hartmann). Diagramme im Analyse-Format."""
+    daten = dashboard.dashboard(conn, settings.betreuerkonto_id)
+    if daten is None:
+        raise HTTPException(404, f"Betreuerkonto {settings.betreuerkonto_id} nicht gefunden")
+    return daten
+
+
+@app.post("/api/dashboard/analysen/{schluessel}/neu-berechnen", tags=["Dashboard"],
+          summary="Dashboard-Diagramm mit anderer Auswahl (Jahr, Kennzahl ...) neu berechnen")
+def dashboard_neu_berechnen(schluessel: str, body: AnalyseNeuIn, request: Request,
+                            conn: Conn = Depends(db.get_conn)) -> Any:
+    """Gleiches SQL, nur erlaubte Werte; das Betreuerkonto ist fest gebunden und nicht waehlbar."""
+    try:
+        basis = dashboard.basis(conn, schluessel, settings.betreuerkonto_id)
+    except KeyError:
+        raise HTTPException(404, "Diagramm nicht gefunden") from None
+    try:
+        return analysen.ausfuehren(basis, body.werte)
+    except analysen.AnalyseFehler as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except db.SqlFehler as exc:
+        logger.warning("Dashboard-Diagramm %s neu berechnen fehlgeschlagen: %s", schluessel, exc)
+        return _fehler_json(request, 400, f"Die Abfrage konnte nicht ausgefuehrt werden: {exc}", "ANALYSE_SQL")
 
 
 @app.get("/api/chat/workspace", tags=["Chat"], summary="Gespeicherte Chatverlaeufe dieses Browsers")
