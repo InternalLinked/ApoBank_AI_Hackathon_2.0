@@ -653,6 +653,7 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 .partner-interests { margin-top: 10px; }
 .partner-interests-label { display: block; color: #8192aa; font-size: 10px; }
 .partner-interests .partner-tags { margin-top: 4px; }
+.partner-profile-actions { display: flex; margin-top: 14px; padding-top: 11px; border-top: 1px solid #dde7f3; }
 
 /* Rechte Leiste einfahren, wenn keine Partnerakte offen ist – der Chat bekommt den Platz.
    Die Leiste behält ihre Breite und gleitet nach rechts aus dem Bild (Spalte animiert auf 0). */

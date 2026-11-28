@@ -128,7 +128,7 @@ export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, o
       {partner && <div className="partner-status-row"><span className="status-dot" />{partner.status}<span className="status-separator">·</span><span>Betreut von {partner.relationshipManager}</span></div>}
 
       {partnerDetail && <section className="partner-profile partner-profile-main" aria-label="Daten aus der Partnerdatenbank">
-        <div className="partner-profile-heading"><h3>Partnerprofil</h3><div className="partner-profile-links"><button type="button" className="excel-button is-compact" onClick={() => void exportPartner(partnerDetail.vermittlerNr)} disabled={exporting} title="Partnerakte als Excel-Datei (.xlsx) herunterladen">{exporting ? <span className="voice-spinner" aria-hidden="true" /> : <Icon name="file" size={13} />}{exporting ? "Wird erstellt …" : "Excel exportieren"}</button>{partnerDetail.obsidianUri ? <a className="obsidian-link" href={partnerDetail.obsidianUri} title="Vermittler-Notiz in Obsidian öffnen">Obsidian-Akte</a> : <span>Live aus Datenbank</span>}</div></div>
+        <div className="partner-profile-heading"><h3>Partnerprofil</h3><div className="partner-profile-links">{partnerDetail.obsidianUri ? <a className="obsidian-link" href={partnerDetail.obsidianUri} title="Vermittler-Notiz in Obsidian öffnen">Obsidian-Akte</a> : <span>Live aus Datenbank</span>}</div></div>
         <dl>
           <div><dt>Vermittler-ID</dt><dd>{partnerDetail.partnerId}</dd></div>
           <div><dt>Unternehmen</dt><dd>{partnerDetail.company}</dd></div>
@@ -142,6 +142,7 @@ export function InspectorPanel({ partner, partnerDetail, findings, mobileOpen, o
           <span className="partner-interests-label" title="Aus dem Obsidian-Profil: Datenbank-Interessen plus im Chat ergänzte">Interessen</span>
           <div className="partner-tags">{partnerDetail.interests.map((interest) => <span key={interest}>{interest}</span>)}</div>
         </div>}
+        <div className="partner-profile-actions"><button type="button" className="excel-button is-compact" onClick={() => void exportPartner(partnerDetail.vermittlerNr)} disabled={exporting} title="Partnerakte als Excel-Datei (.xlsx) herunterladen">{exporting ? <span className="voice-spinner" aria-hidden="true" /> : <Icon name="file" size={13} />}{exporting ? "Wird erstellt …" : "Excel exportieren"}</button></div>
       </section>}
 
       {/* Persönliches wird nur über den Chat erfasst; das Netz zeigt, was in Obsidian steht. */}
