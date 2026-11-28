@@ -584,7 +584,7 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 .inspector-panel { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .inspector-panel > * { flex-shrink: 0; }
 .inspector-panel .inspector-scroll { flex: none; overflow: visible; }
-.inspector-panel .inspector-heading { position: sticky; z-index: 2; top: 0; background: #fff; }
+.inspector-panel .inspector-heading { position: sticky; z-index: 2; top: 0; background: var(--inspector-bg, #fff); }
 
 /* Partnerprofil (Daten aus der Partnerdatenbank) etwas groesser darstellen */
 .partner-profile-main { margin: 0 17px 18px; padding: 16px 18px; border-radius: 13px; }
@@ -696,3 +696,8 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 @media (prefers-reduced-motion: reduce) {
   .workspace-shell, .chat-sidebar, .inspector-panel { transition: none; } /* ohne Animation */
 }
+
+/* Partnerakte (rechte Leiste): leicht bläulicher Hintergrund für mehr Kontrast zu den Karten.
+   Das Partnerprofil (.partner-profile) behält seine helle Karte, das Obsidian-Netz seine dunkle. */
+.inspector-panel { --inspector-bg: #e6eefa; border-left-color: #d3dfef; background: var(--inspector-bg); }
+.inspector-panel .partner-profile { border-color: #d3dfef; box-shadow: 0 1px 3px rgba(23, 66, 127, .06); }
