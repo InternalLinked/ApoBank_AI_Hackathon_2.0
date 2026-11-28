@@ -331,7 +331,7 @@ def test_startvorschlaege_sind_vorberechnet_und_top10_ist_kontobezogen(client, m
     # Startantworten verwenden den Datenstand beim Start, auch nach einer Aktenaenderung.
     assert client.put("/api/vermittler/4251/geschaeftszahlen/2025",
                       json={"volumen_eur": 1, "anzahl_darlehen": 1}).status_code == 200
-    for key in ("top10", "einbrueche", "gespraech", "marktgebiete", "portfolio", "notizen"):
+    for key in ("top10", "einbrueche", "gespraech", "marktgebiete", "portfolio", "karte"):
         response = client.post(url, json={"inhalt": key, "startvorschlag": key}, headers=BROWSER_A)
         assert response.status_code == 200
         if key == "top10":
@@ -346,6 +346,19 @@ def test_startvorschlaege_sind_vorberechnet_und_top10_ist_kontobezogen(client, m
             # Betreuerkonto ist fest gebunden und nicht von aussen waehlbar
             assert client.post(f"/api/chat/analysen/{analyse['id']}/neu-berechnen",
                                json={"werte": {"konto": "MGK76244"}}, headers=BROWSER_A).status_code == 422
+        if key == "karte":
+            [analyse] = response.json()["analysen"]
+            assert analyse["diagramm"]["typ"] == "karte"
+            assert analyse["spalten"] == ["Ort", "lat", "lon", "Anzahl Vermittler", "Top-Vermittler", "Wert"]
+            assert all(47 < z[1] < 55.1 and 5.8 < z[2] < 15.1 for z in analyse["zeilen"])   # alles in Deutschland
+            assert [p["name"] for p in analyse["parameter"]] == ["jahr", "kennzahl", "plz_region"]
+            alle_orte = {z[0] for z in analyse["zeilen"]}
+            neu = client.post(f"/api/chat/analysen/{analyse['id']}/neu-berechnen",
+                              json={"werte": {"plz_region": "p3", "kennzahl": "anzahl"}}, headers=BROWSER_A)
+            assert neu.status_code == 200, neu.text
+            assert neu.json()["titel"] == "Anzahl Darlehen 2025 nach Standort – PLZ 3 · Hannover, Kassel"
+            region = {z[0] for z in neu.json()["zeilen"]}
+            assert "Paderborn" in region and region < alle_orte   # 33xxx gehoert zu PLZ 3, andere fallen weg
 
 
 def test_import_creates_db_and_vault(client):

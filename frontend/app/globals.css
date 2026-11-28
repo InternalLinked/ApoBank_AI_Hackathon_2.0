@@ -211,6 +211,17 @@ kbd { padding: 2px 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 
 .chart-note { margin: 8px 0 0; color: #8c9a9b; font-size: 11px; }
 .chart-tooltip em { color: #17427f; font-size: 11px; font-style: normal; font-weight: 600; }
 .chart-frame.is-selectable .chart-hit.is-clickable { cursor: pointer; }
+/* Kartenansicht (MapChart.tsx): hochkant, deshalb in der Breite begrenzt */
+.chart-map .map-stage { position: relative; max-width: 440px; margin: 0 auto; }
+.chart-map svg { overflow: hidden; }
+.chart-map .map-laender path { fill: #eef2f7; stroke: #c3cdda; }
+.chart-map .map-bubble { fill-opacity: .55; cursor: pointer; transition: fill-opacity .12s ease; }
+.chart-map .map-bubble.is-active { fill-opacity: .9; }
+.chart-map .map-bubble:focus { outline: none; }
+.chart-map .map-label { fill: #20383f; font-weight: 600; paint-order: stroke; stroke: #fff; pointer-events: none; }
+.chart-map .map-tooltip { white-space: normal; max-width: 260px; }
+.chart-map .map-tooltip small { color: #43555f; font-size: 11px; }
+.chart-map .chart-note { text-align: center; }
 /* Auswahlfelder über dem Diagramm: von der KI (Jahr, Top-N, Kennzahl) bzw. im Browser (Sortierung) */
 .analysis-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: #f6f8fb; }
 .analysis-control { display: flex; flex-direction: column; gap: 3px; min-width: 0; }

@@ -146,7 +146,16 @@ CREATE TABLE IF NOT EXISTS chat_aenderung (
     entschieden_am     TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_vermittler_name     ON vermittler(name, vorname);
+-- Koordinaten je Postleitzahl (offene Daten, GeoNames CC BY 4.0) fuer die Kartenansicht.
+-- Wird von db.init_db aus backend/geodaten/plz_koordinaten.csv befuellt. JOIN: v_vermittler.plz = plz_koordinaten.plz
+CREATE TABLE IF NOT EXISTS plz_koordinaten (
+    plz  TEXT PRIMARY KEY,
+    ort  TEXT NOT NULL,
+    lat  REAL NOT NULL,
+    lon  REAL NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_vermittler_name    ON vermittler(name, vorname);
 CREATE INDEX IF NOT EXISTS idx_vermittler_betreuer ON vermittler(mitarbeiter_id);
 CREATE INDEX IF NOT EXISTS idx_vermittler_status   ON vermittler(status);
 CREATE INDEX IF NOT EXISTS idx_kontakt_ort         ON kontakt(ort);

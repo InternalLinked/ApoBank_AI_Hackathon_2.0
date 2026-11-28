@@ -16,7 +16,7 @@ type AnalysisPanelProps = {
 };
 
 /** Kennungen und Jahre: ohne Tausenderpunkt anzeigen („4251“, nicht „4.251“) und nie als Kennzahl anbieten */
-const ID_COLUMN = /(^|_)(nr|id|knr|plz|jahr)$/i;
+const ID_COLUMN = /(^|_)(nr|id|knr|plz|jahr)$|^(lat|lon)$/i;
 /** Spalte mit der Vermittlernummer – macht Balken und Zeilen klickbar */
 const PARTNER_NR_COLUMN = /^vermittler_?nr$/i;
 const PARTNER_NAME_COLUMN = /^(vermittler|vermittler_name|name)$/i;

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Analysis, ChartUnit } from "@/lib/workspace-contracts";
+import { hasCoordinates, MapChart } from "./MapChart";
 
 /*
  * Diagramm ohne externe Bibliothek (reines SVG):
@@ -215,6 +216,7 @@ function LineChart({ points, unit, title }: { points: Point[]; unit: ChartUnit; 
 export function AnalysisChart({ analysis, onSelect, selectHint }: { analysis: Analysis } & SelectProps) {
   const points = useMemo(() => chartPoints(analysis), [analysis]);
   if (!points) return null;
+  if (analysis.chart.type === "karte" && hasCoordinates(analysis)) return <MapChart analysis={analysis} format={formatValue} />;
   return analysis.chart.type === "linie"
     ? <LineChart points={points} unit={analysis.chart.unit} title={analysis.title} />
     : <BarChart points={points} unit={analysis.chart.unit} title={analysis.title} onSelect={onSelect} selectHint={selectHint} />;

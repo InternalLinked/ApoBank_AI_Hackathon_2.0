@@ -25,7 +25,7 @@ const STARTER_PROMPTS: Array<{ id: StartSuggestion; label: string; hint: string;
   { id: "gespraech", label: "Gespräch vorbereiten", hint: "Dr. Hans Baumann (4251)", prompt: "Bereite mich auf das Gespräch mit Dr. Hans Baumann (Vermittler 4251) vor." },
   { id: "marktgebiete", label: "Marktgebiete vergleichen", hint: "Volumen 2025 je Region", prompt: "Vergleiche das Volumen 2025 nach Marktgebiet." },
   { id: "portfolio", label: "Portfolio-Überblick", hint: "Status und Regionen", prompt: "Gib mir einen Überblick über das Vermittlerportfolio." },
-  { id: "notizen", label: "Notizen durchsuchen", hint: "z. B. Praxisfinanzierung", prompt: "Suche in den Gesprächsnotizen nach Praxisfinanzierung." },
+  { id: "karte", label: "Kartenansicht", hint: "Volumen je Standort", prompt: "Zeige das Kreditvolumen 2025 nach Standort auf der Deutschlandkarte." },
 ];
 
 type ConversationPaneProps = {

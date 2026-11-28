@@ -75,7 +75,7 @@ export type AnalysisParameter = {
   options: Array<{ value: string; label: string }>;
 };
 
-export type ChartType ="balken" | "linie" | "tabelle";
+export type ChartType = "balken" | "linie" | "karte" | "tabelle";
 export type ChartUnit = "eur" | "anzahl" | "prozent" | "keine";
 
 export type Analysis = {
@@ -174,7 +174,7 @@ export type ObsidianGraph = {
   edges: Array<{ from: string; to: string }>;
 };
 
-export type StartSuggestion = "top10" | "einbrueche" | "gespraech" | "marktgebiete" | "portfolio" | "notizen";
+export type StartSuggestion = "top10" | "einbrueche" | "gespraech" | "marktgebiete" | "portfolio" | "karte";
 
 export type WorkspaceSnapshot = {
   accountName: string | null;

@@ -251,7 +251,7 @@ function candidatesFrom(value: unknown): PartnerCandidate[] {
     : [];
 }
 
-const CHART_TYPES: ChartType[] = ["balken", "linie", "tabelle"];
+const CHART_TYPES: ChartType[] = ["balken", "linie", "karte", "tabelle"];
 const CHART_UNITS: ChartUnit[] = ["eur", "anzahl", "prozent", "keine"];
 
 function toAnalysis(value: unknown, createdAt: string): Analysis | null {

@@ -211,8 +211,11 @@ TOOLS: list[dict[str, Any]] = [
                 "diagramm": {
                     "type": "object",
                     "properties": {
-                        "typ": {"type": "string", "enum": ["balken", "linie", "tabelle"],
-                                "description": "balken = Ranking/Vergleich, linie = Verlauf ueber Jahre, tabelle = keine Grafik"},
+                        "typ": {"type": "string", "enum": ["balken", "linie", "karte", "tabelle"],
+                                "description": "balken = Ranking/Vergleich, linie = Verlauf ueber Jahre, tabelle = keine Grafik, "
+                                               "karte = Deutschlandkarte mit Blasen je Standort: SQL braucht Spalten lat und lon "
+                                               "(JOIN plz_koordinaten p ON p.plz = v.plz, je Ort AVG(p.lat) AS lat, AVG(p.lon) AS lon), "
+                                               "x = Ortsspalte, y = Wert"},
                         "x": {"type": "string", "description": "Spaltenname der Kategorie bzw. des Jahres"},
                         "y": {"type": "string", "description": "Spaltenname des Zahlenwerts"},
                         "einheit": {"type": "string", "enum": ["eur", "anzahl", "prozent", "keine"]},

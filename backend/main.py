@@ -644,6 +644,52 @@ def _top_vermittler_analyse(conn: Conn) -> dict[str, Any] | None:
     return analyse if analyse["zeilen"] else None
 
 
+# Leitregionen nach erster PLZ-Ziffer – Beispielstaedte fuer die Auswahl
+PLZ_REGIONEN = {
+    "0": "Dresden, Leipzig", "1": "Berlin, Rostock", "2": "Hamburg, Bremen, Kiel", "3": "Hannover, Kassel",
+    "4": "Düsseldorf, Ruhr, Münster", "5": "Köln, Bonn, Aachen", "6": "Frankfurt, Mannheim, Saar",
+    "7": "Stuttgart, Karlsruhe", "8": "München, Augsburg", "9": "Nürnberg, Würzburg, Erfurt",
+}
+
+_KARTE_SQL = (
+    "WITH basis AS ("
+    " SELECT v.ort, v.plz, TRIM(COALESCE(v.vorname || ' ', '') || v.name) AS name,"
+    " CASE :kennzahl WHEN 'anzahl' THEN g.anzahl_darlehen ELSE g.volumen_eur END AS wert"
+    " FROM v_vermittler v JOIN geschaeftszahlen g ON g.vermittler_nr = v.vermittler_nr"
+    # Region als 'p0'..'p9' (Text): eine reine Ziffer wuerde als Zahl gebunden und nie gleich SUBSTR(...) sein
+    " WHERE g.sparte = 'gesamt' AND g.jahr = :jahr AND (:plz_region = 'alle' OR 'p' || SUBSTR(v.plz, 1, 1) = :plz_region)), "
+    "rang AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY ort ORDER BY wert DESC) AS platz FROM basis WHERE wert IS NOT NULL) "
+    "SELECT r.ort AS Ort, ROUND(AVG(p.lat), 4) AS lat, ROUND(AVG(p.lon), 4) AS lon, COUNT(*) AS \"Anzahl Vermittler\", "
+    "GROUP_CONCAT(CASE WHEN r.platz <= 3 THEN r.name END, ', ') AS \"Top-Vermittler\", SUM(r.wert) AS Wert "
+    "FROM rang r JOIN plz_koordinaten p ON p.plz = r.plz GROUP BY r.ort ORDER BY Wert DESC"
+)
+
+
+def _karten_analyse(conn: Conn) -> dict[str, Any] | None:
+    """Startvorschlag 'Kartenansicht': Blasen je Ort auf der Deutschlandkarte (Jahr, Kennzahl, Marktgebiet waehlbar)."""
+    jahre = [r[0] for r in conn.execute(
+        "SELECT DISTINCT jahr FROM geschaeftszahlen WHERE sparte = 'gesamt' ORDER BY jahr DESC").fetchall()][:analysen.MAX_OPTIONEN]
+    if not jahre:
+        return None
+    parameter = [
+        {"name": "jahr", "label": "Jahr", "standard": str(2025 if 2025 in jahre else jahre[0]),
+         "optionen": [{"wert": str(j), "label": str(j), "einheit": ""} for j in jahre]},
+        {"name": "kennzahl", "label": "Kennzahl", "standard": "volumen", "optionen": [
+            {"wert": "volumen", "label": "Kreditvolumen", "einheit": "eur"},
+            {"wert": "anzahl", "label": "Anzahl Darlehen", "einheit": "anzahl"}]},
+        {"name": "plz_region", "label": "PLZ-Region", "standard": "alle",
+         "optionen": [{"wert": "alle", "label": "Ganz Deutschland", "einheit": ""},
+                      *({"wert": f"p{ziffer}", "label": f"PLZ {ziffer} · {orte}", "einheit": ""}
+                        for ziffer, orte in PLZ_REGIONEN.items())]},
+    ]
+    analyse = analysen.ausfuehren({
+        "titel_vorlage": "{kennzahl} {jahr} nach Standort – {plz_region}", "titel": "Kartenansicht",
+        "sql": _KARTE_SQL, "parameter": parameter,
+        "diagramm_basis": {"typ": "karte", "x": "Ort", "y": "Wert", "einheit": "eur"},
+    })
+    return analyse if analyse["zeilen"] else None
+
+
 def _startvorschlaege(conn: Conn) -> tuple[str | None, dict[str, openai_copilot.CopilotReply]]:
     konto = conn.execute("SELECT name FROM betreuer WHERE mitarbeiter_id = ?",
                          (settings.betreuerkonto_id,)).fetchone()
@@ -704,13 +750,12 @@ def _startvorschlaege(conn: Conn) -> tuple[str | None, dict[str, openai_copilot.
         content=gespraech, configured=bool(settings.openai_api_key), vermittler_nr=4251 if partner else None,
     )
 
-    treffer = obsidian.search("Praxisfinanzierung", limit=10, nur_eintraege=True)
-    notizen = ["**Gesprächsnotizen zu Praxisfinanzierung**"]
-    notizen.extend(f"- [Notiz öffnen]({obsidian.obsidian_uri(t['datei'])}) · {t['ausschnitt']}" for t in treffer)
-    if not treffer:
-        notizen.append("Keine passenden Gesprächsnotizen gefunden.")
-    antworten["notizen"] = openai_copilot.CopilotReply(
-        content="\n\n".join(notizen), configured=bool(settings.openai_api_key),
+    karte = _karten_analyse(conn)
+    antworten["karte"] = openai_copilot.CopilotReply(
+        content=(f"**{karte['titel']}**\n\n{karte['anzahl']} Standorte. Je größer die Blase, desto höher der Wert – "
+                 "Details beim Darüberfahren." if karte else
+                 "**Kartenansicht**\n\nFür die Karte liegen keine Standortdaten vor."),
+        configured=bool(settings.openai_api_key), analysen=[karte] if karte else [],
     )
     return (konto["name"] if konto else None), antworten
 

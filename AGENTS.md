@@ -128,6 +128,9 @@ in der Excel werden also automatisch importiert.
   Werden Sparten (Baufinanzierung, Existenzgründung, …) ergänzt, muss weiterhin eine `gesamt`-Zeile
   gepflegt werden – sonst fehlen die Werte in Listen und Analysen.
 - `v_vermittler` (View) = Vermittler + Kontakt + Betreuer + Filiale flach; erste Wahl für SQL-Abfragen.
+- `plz_koordinaten (plz, ort, lat, lon)` = offene PLZ-Mittelpunkte (GeoNames), von `init_db` aus
+  `backend/geodaten/plz_koordinaten.csv` geladen. Grundlage der Kartenansicht (Diagrammtyp `karte`: Spalten `lat`/`lon`,
+  Frontend `MapChart.tsx`, Startvorschlag `karte`). Quellen/Lizenzen: `backend/geodaten/README.md`.
 
 ---
 

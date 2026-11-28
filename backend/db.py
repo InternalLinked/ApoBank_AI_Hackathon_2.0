@@ -30,9 +30,23 @@ def init_db() -> None:
     try:
         conn.executescript(SCHEMA_SQL)
         _add_missing_columns(conn)
+        _load_plz_koordinaten(conn)
         conn.commit()
     finally:
         conn.close()
+
+
+PLZ_KOORDINATEN_CSV = Path(__file__).resolve().parent / "geodaten" / "plz_koordinaten.csv"
+
+
+def _load_plz_koordinaten(conn: sqlite3.Connection) -> None:
+    """Offene PLZ-Koordinaten einmalig einlesen (Kartenansicht). Ohne Datei bleibt die Tabelle leer."""
+    if conn.execute("SELECT 1 FROM plz_koordinaten LIMIT 1").fetchone() or not PLZ_KOORDINATEN_CSV.exists():
+        return
+    import csv
+    with PLZ_KOORDINATEN_CSV.open(encoding="utf-8", newline="") as datei:
+        conn.executemany("INSERT OR IGNORE INTO plz_koordinaten (plz, ort, lat, lon) VALUES (?, ?, ?, ?)",
+                         ((r["plz"], r["ort"], float(r["lat"]), float(r["lon"])) for r in csv.DictReader(datei, delimiter=";")))
 
 
 def _add_missing_columns(conn: sqlite3.Connection) -> None:

@@ -121,4 +121,4 @@ class ChatNachrichtIn(BaseModel):
     inhalt: str = Field(min_length=1, max_length=8_000)
     anhaenge: list[str] = Field(default_factory=list, max_length=5,
                                 description="IDs zuvor hochgeladener Anhaenge (POST .../anhaenge), gehen mit an die KI")
-    startvorschlag: Literal["top10", "einbrueche", "gespraech", "marktgebiete", "portfolio", "notizen"] | None = None
+    startvorschlag: Literal["top10", "einbrueche", "gespraech", "marktgebiete", "portfolio", "karte"] | None = None
