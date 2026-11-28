@@ -19,15 +19,6 @@ function formatSize(bytes: number): string {
 /** Stufen der automatischen Modellwahl (backend/modellwahl.py) */
 const TIER_LABEL: Record<string, string> = { smalltalk: "schnell", analyse: "Analyse", aendern: "Änderung", standard: "Standard" };
 
-const STARTER_PROMPTS: Array<{ id: StartSuggestion; label: string; hint: string; prompt: string }> = [
-  { id: "top10", label: "Meine Top 10", hint: "Ranking 2025 mit Diagramm", prompt: "Zeige meine Top 10 Vermittler nach Kreditvolumen 2025." },
-  { id: "einbrueche", label: "Größte Einbrüche", hint: "Vergleich 2024 → 2025", prompt: "Welche 10 Vermittler sind von 2024 auf 2025 beim Volumen am stärksten eingebrochen?" },
-  { id: "gespraech", label: "Gespräch vorbereiten", hint: "Dr. Hans Baumann (4251)", prompt: "Bereite mich auf das Gespräch mit Dr. Hans Baumann (Vermittler 4251) vor." },
-  { id: "marktgebiete", label: "Marktgebiete vergleichen", hint: "Volumen 2025 je Region", prompt: "Vergleiche das Volumen 2025 nach Marktgebiet." },
-  { id: "portfolio", label: "Portfolio-Überblick", hint: "Status und Regionen", prompt: "Gib mir einen Überblick über das Vermittlerportfolio." },
-  { id: "karte", label: "Kartenansicht", hint: "Volumen je Standort", prompt: "Zeige das Kreditvolumen 2025 nach Standort auf der Deutschlandkarte." },
-];
-
 type ConversationPaneProps = {
   conversation: Conversation | undefined;
   messages: ChatMessage[];
@@ -201,7 +192,7 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
       <div className="message-scroll">
         <div className="message-column">
           {messages.length === 0 ? (
-            <div className="empty-conversation"><div className="empty-orbit"><Icon name="sparkle" size={23} /></div><h2>Womit kann ich helfen?</h2><p>Frage nach einer Partnerakte, Geschäftszahlen oder einem Gesprächsprotokoll.</p><div className="suggestion-chips suggestion-grid">{STARTER_PROMPTS.map((starter) => <button key={starter.id} type="button" disabled={isSending} onClick={() => onSend(starter.prompt, starter.id)}><span><strong>{starter.label}</strong><small>{starter.hint}</small></span><Icon name="arrow" size={14} /></button>)}</div></div>
+            <div className="empty-conversation"><div className="empty-orbit"><Icon name="sparkle" size={23} /></div><h2>Womit kann ich helfen?</h2><p>Frage nach einer Partnerakte, Geschäftszahlen oder einem Gesprächsprotokoll.</p></div>
           ) : messages.map((message) => (
             <article className={`message-row ${message.role}`} key={message.id}>
               {message.role === "assistant" && <div className="assistant-avatar"><Icon name="sparkle" size={15} /></div>}
@@ -282,7 +273,7 @@ export function ConversationPane({ conversation, messages, partner, aiConfigured
       </div>
 
       <div className="composer-wrap">
-        <div className="quick-prompts"><span>Vorschläge</span><button type="button" onClick={() => onSend("Welche Punkte sollte ich im Gespräch ansprechen?")}>Gespräch vorbereiten</button><button type="button" onClick={() => onSend("Zeig mir offene Vorgänge")}>Offene Vorgänge</button><button type="button" disabled={isSending} onClick={() => onSend(STARTER_PROMPTS[0].prompt, "top10")}>Meine Top 10</button></div>
+        <div className="quick-prompts"><span>Vorschläge</span><button type="button" onClick={() => onSend("Welche Punkte sollte ich im Gespräch ansprechen?")}>Gespräch vorbereiten</button><button type="button" onClick={() => onSend("Zeig mir offene Vorgänge")}>Offene Vorgänge</button><button type="button" disabled={isSending} onClick={() => onSend("Zeige meine Top 10 Vermittler nach Kreditvolumen 2025.", "top10")}>Meine Top 10</button></div>
         <form className="composer" onSubmit={submit}>
           {attachment && (
             <div className="composer-attachment" role="status">
