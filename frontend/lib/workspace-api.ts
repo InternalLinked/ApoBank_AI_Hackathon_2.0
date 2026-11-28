@@ -1,5 +1,6 @@
 import type {
   Analysis,
+  DashboardData,
   ChangeProposal,
   ProposalStatus,
   ProposedChange,
@@ -514,8 +515,36 @@ export function createWorkspaceApi(): WorkspaceApi {
       }));
     },
 
+    async getDashboard(): Promise<DashboardData> {
+      const data = record(await request<unknown>("/dashboard"));
+      const advisor = record(data.berater);
+      const kpi = data.kennzahlen ? record(data.kennzahlen) : null;
+      const n = (value: unknown) => (typeof value === "number" ? value : 0);
+      return {
+        advisor: {
+          id: String(advisor.mitarbeiter_id ?? ""),
+          shortName: typeof advisor.kuerzel === "string" ? advisor.kuerzel : null,
+          name: String(advisor.name ?? "Berater"),
+          branch: typeof advisor.filiale === "string" ? advisor.filiale : null,
+          marketArea: typeof advisor.marktgebiet === "string" ? advisor.marktgebiet : null,
+        },
+        kpis: kpi ? {
+          year: n(kpi.jahr), previousYear: n(kpi.vorjahr), partnerCount: n(kpi.anzahl_vermittler), activePartners: n(kpi.aktive_vermittler),
+          volume: n(kpi.volumen_eur), previousVolume: n(kpi.volumen_vorjahr_eur),
+          changePercent: typeof kpi.veraenderung_prozent === "number" ? kpi.veraenderung_prozent : null, loanCount: n(kpi.anzahl_darlehen),
+        } : null,
+        analyses: Array.isArray(data.analysen)
+          ? data.analysen.map((item) => toAnalysis(item, "Stand heute")).filter((item): item is Analysis => item !== null)
+          : [],
+      };
+    },
+
     async rerunAnalysis(analysis: Analysis, values: Record<string, string>): Promise<Analysis> {
-      const data = await request<unknown>(`/chat/analysen/${encodeURIComponent(analysis.id)}/neu-berechnen`, {
+      // Dashboard-Diagramme rechnet ein eigener Endpunkt neu (Betreuerkonto fest im Backend)
+      const path = analysis.id.startsWith("dashboard-")
+        ? `/dashboard/analysen/${encodeURIComponent(analysis.id.slice("dashboard-".length))}/neu-berechnen`
+        : `/chat/analysen/${encodeURIComponent(analysis.id)}/neu-berechnen`;
+      const data = await request<unknown>(path, {
         method: "POST",
         body: JSON.stringify({ werte: values }),
       });

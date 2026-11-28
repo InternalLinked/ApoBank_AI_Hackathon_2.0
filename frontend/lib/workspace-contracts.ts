@@ -162,7 +162,7 @@ export type PersonalProfile = {
 export type ObsidianGraphNode = {
   id: string;
   label: string;
-  /** vermittler | profil | fakt | eintrag | betreuer | filiale | vermittler-link | notiz */
+  /** vermittler | profil | kategorie | fakt | eintrag | betreuer | filiale | vermittler-link | notiz */
   type: string;
   uri: string | null;
   detail: string | null;
@@ -231,7 +231,26 @@ export type Transcription = {
   processingMs: number;
 };
 
+/** Berater-Dashboard (POC): nur die eigenen Vermittler des fest eingestellten Betreuers */
+export type DashboardData = {
+  advisor: { id: string; shortName: string | null; name: string; branch: string | null; marketArea: string | null };
+  kpis: {
+    year: number;
+    previousYear: number;
+    partnerCount: number;
+    activePartners: number;
+    volume: number;
+    previousVolume: number;
+    changePercent: number | null;
+    loanCount: number;
+  } | null;
+  /** Diagramme im selben Format wie im Analyse-Tab; ids beginnen mit „dashboard-“ */
+  analyses: Analysis[];
+};
+
 export interface WorkspaceApi {
+  /** Berater-Dashboard laden */
+  getDashboard(): Promise<DashboardData>;
   loadWorkspace(): Promise<WorkspaceSnapshot>;
   /** Excel-Export (.xlsx, im Backend erzeugt); liefert den Dateinamen */
   exportAnalysis(analysis: Analysis): Promise<string>;

@@ -4,6 +4,9 @@ import { Icon } from "./Icons";
 
 type ChatSidebarProps = {
   accountName: string | null;
+  /** Dashboard ist gerade in der Mitte zu sehen */
+  dashboardActive: boolean;
+  onOpenDashboard: () => void;
   conversations: Conversation[];
   activeConversationId: string;
   mobileOpen: boolean;
@@ -15,6 +18,8 @@ type ChatSidebarProps = {
 
 export function ChatSidebar({
   accountName,
+  dashboardActive,
+  onOpenDashboard,
   conversations,
   activeConversationId,
   mobileOpen,
@@ -37,10 +42,9 @@ export function ChatSidebar({
         <button className="icon-button sidebar-close" aria-label="Chats schließen" onClick={onCloseMobile}><Icon name="close" /></button>
       </div>
 
-      <button className="workspace-switcher" type="button">
-        <span className="workspace-avatar">P</span>
-        <span><strong>Partnervertrieb</strong><small>Arbeitsbereich</small></span>
-        <Icon name="chevron" size={15} />
+      <button className={`workspace-switcher dashboard-button ${dashboardActive ? "is-active" : ""}`} type="button" onClick={() => { onOpenDashboard(); onCloseMobile(); }} aria-current={dashboardActive ? "page" : undefined}>
+        <span className="workspace-avatar"><Icon name="dashboard" size={16} /></span>
+        <span><strong>Dashboard</strong></span>
       </button>
 
       <button className="new-chat-button" type="button" onClick={onNewConversation}>
@@ -61,7 +65,7 @@ export function ChatSidebar({
           <div className="conversation-row" key={conversation.id}>
             <button
               type="button"
-              className={`conversation-item ${conversation.id === activeConversationId ? "is-active" : ""}`}
+              className={`conversation-item ${!dashboardActive && conversation.id === activeConversationId ? "is-active" : ""}`}
               onClick={() => { onSelect(conversation.id); onCloseMobile(); }}
             >
               <span className="conversation-icon"><Icon name="chat" size={16} /></span>

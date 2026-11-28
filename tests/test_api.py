@@ -625,7 +625,15 @@ def test_obsidian_netz(client):
     knoten = {k["id"]: k for k in netz["knoten"]}
     assert netz["zentrum"] == "VM-4251" and knoten["VM-4251"]["typ"] == "vermittler"
     assert knoten["VM-4251 Profil"]["typ"] == "profil"
-    assert any(k["typ"] == "fakt" and "Tim" in k["label"] for k in knoten.values())
+    tim = next(k for k in knoten.values() if k["typ"] == "fakt" and "Tim" in k["label"])
+    # Kategorie ist ein eigener Knoten zwischen Profil und Info
+    haustiere = knoten["kategorie:haustiere"]
+    assert haustiere["typ"] == "kategorie" and haustiere["label"] == "Haustiere"
+    assert "%23Haustiere" in haustiere["uri"]
+    kanten = {frozenset((e["von"], e["nach"])) for e in netz["kanten"]}
+    assert frozenset(("VM-4251 Profil", "kategorie:haustiere")) in kanten
+    assert frozenset(("kategorie:haustiere", tim["id"])) in kanten
+    assert frozenset(("VM-4251 Profil", tim["id"])) not in kanten
     assert any(k["typ"] == "eintrag" and k["label"] == "Jahresgespräch" for k in knoten.values())
     assert knoten["VM-500"]["typ"] == "vermittler-link"  # Wikilink bzw. Backlink
     assert any(k["typ"] == "betreuer" for k in knoten.values()) and any(k["typ"] == "filiale" for k in knoten.values())
@@ -1002,3 +1010,29 @@ def test_interessen_aus_db_im_obsidian_profil(client):
     assert client.get("/api/vermittler/4251").json()["interessen_profil"] == ["Sport", "Golf", "Segeln"]
     neu = profil_path.read_text(encoding="utf-8")
     assert neu.index("## Interessen") < neu.index("## Familie")
+
+
+def test_dashboard_nur_eigene_vermittler(client):
+    """Dashboard zeigt nur die Vermittler des fest eingestellten Betreuerkontos (POC ohne Login)."""
+    from backend.config import settings
+    konto = settings.betreuerkonto_id
+    eigene = {i["vermittler_nr"] for i in client.get("/api/vermittler", params={"mitarbeiter_id": konto, "limit": 500}).json()["items"]}
+    assert eigene
+
+    d = client.get("/api/dashboard").json()
+    assert d["berater"]["mitarbeiter_id"] == konto
+    assert d["kennzahlen"]["anzahl_vermittler"] == len(eigene)
+    diagramme = {a["id"]: a for a in d["analysen"]}
+    assert list(diagramme) == ["dashboard-verlauf", "dashboard-top", "dashboard-karte", "dashboard-status", "dashboard-liste"]
+    liste = diagramme["dashboard-liste"]
+    assert {z[0] for z in liste["zeilen"]} == eigene  # alle eigenen, keine fremden
+    assert {z[0] for z in diagramme["dashboard-top"]["zeilen"]} <= eigene
+    # Summe im Verlauf = Summe der eigenen Vermittler im Kennzahl-Jahr
+    verlauf = dict(diagramme["dashboard-verlauf"]["zeilen"])
+    assert verlauf[d["kennzahlen"]["jahr"]] == d["kennzahlen"]["volumen_eur"]
+
+    neu = client.post("/api/dashboard/analysen/top/neu-berechnen", json={"werte": {"limit": "5", "kennzahl": "anzahl"}}).json()
+    assert len(neu["zeilen"]) <= 5 and neu["diagramm"]["einheit"] == "anzahl" and {z[0] for z in neu["zeilen"]} <= eigene
+    # Konto ist nicht waehlbar, unbekannte Diagramme gibt es nicht
+    assert client.post("/api/dashboard/analysen/top/neu-berechnen", json={"werte": {"konto": "MGK76244"}}).status_code == 422
+    assert client.post("/api/dashboard/analysen/gibtsnicht/neu-berechnen", json={"werte": {}}).status_code == 404

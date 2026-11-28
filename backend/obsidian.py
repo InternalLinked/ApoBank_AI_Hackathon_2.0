@@ -798,8 +798,16 @@ def netz(v: dict[str, Any], max_eintraege: int = 15, max_fakten: int = 15) -> di
     profil = read_profil(nr)
     pid = node(f"{name} Profil", "Persönliches Profil", "profil", profil["pfad"], f"{len(profil['fakten'])} Infos")
     edge(hub, pid)
+    # Kategorie (= "## Ueberschrift" in der Profil-Notiz) als eigener Knoten: Profil → Interessen → Fussball
     for f in profil["fakten"][:max_fakten]:
-        edge(pid, node(f"fakt:{f['id']}", f["text"], "fakt", None, f["kategorie_label"]))
+        kid = f"kategorie:{f['kategorie']}"
+        if kid not in nodes:
+            anzahl = sum(1 for x in profil["fakten"] if x["kategorie"] == f["kategorie"])
+            node(kid, f["kategorie_label"], "kategorie", None, f"{anzahl} {'Info' if anzahl == 1 else 'Infos'}")
+            # Klick springt in Obsidian direkt zur Ueberschrift
+            nodes[kid]["uri"] = obsidian_uri(profil["pfad"]) + quote(f"#{f['kategorie_label']}")
+            edge(pid, kid)
+        edge(kid, node(f"fakt:{f['id']}", f["text"], "fakt", None, f"notiert {f['datum']}" if f["datum"] else None))
 
     eigene_texte: list[str] = []
     for e in list_entries(nr)[:max_eintraege]:
